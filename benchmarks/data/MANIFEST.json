@@ -1,0 +1,104 @@
+{
+  "files": {
+    "cec/shift_data_1.txt": {
+      "bytes": 2502,
+      "group": "cec",
+      "note": "CEC2017 shift vector, function 1",
+      "sha256": "d9f46351997bbdc4303e9aa7e6e7b271126db11642e992e8e114511424d12b9d",
+      "url": "https://raw.githubusercontent.com/lacerdamarcelo/cec17_python/master/input_data/shift_data_1.txt"
+    },
+    "cec/shift_data_3.txt": {
+      "bytes": 2502,
+      "group": "cec",
+      "note": "CEC2017 shift vector, function 3",
+      "sha256": "c341a9cb4bbfd6fd87c72941b2989a2a3e9722cf57300576464a186e93334201",
+      "url": "https://raw.githubusercontent.com/lacerdamarcelo/cec17_python/master/input_data/shift_data_3.txt"
+    },
+    "knapsack/inverse_strongly_correlated_n100_R1000.kp": {
+      "bytes": 820,
+      "group": "knapsack",
+      "note": "Pisinger inverse strongly correlated, n=100, R=1000",
+      "sha256": "003caffe83f4673fe494f390c3a7677ab426020ae0079de9eb4702d3df88d347",
+      "url": "https://raw.githubusercontent.com/likr/kplib/master/03InverseStronglyCorrelated/n00100/R01000/s000.kp"
+    },
+    "knapsack/strongly_correlated_n100_R1000.kp": {
+      "bytes": 820,
+      "group": "knapsack",
+      "note": "Pisinger strongly correlated, n=100, R=1000 (hard: uniform value density)",
+      "sha256": "a496027b76d6d559f423bb5041fe9b4e6d8aa220e5cee483ee0424b7540a3627",
+      "url": "https://raw.githubusercontent.com/likr/kplib/master/02StronglyCorrelated/n00100/R01000/s000.kp"
+    },
+    "knapsack/strongly_correlated_n200_R1000.kp": {
+      "bytes": 1617,
+      "group": "knapsack",
+      "note": "Pisinger strongly correlated, n=200, R=1000",
+      "sha256": "f968720314a5c81badc344dd81099147d26c22d3ae4b44b7c44966a941c5242e",
+      "url": "https://raw.githubusercontent.com/likr/kplib/master/02StronglyCorrelated/n00200/R01000/s000.kp"
+    },
+    "knapsack/uncorrelated_n100_R1000.kp": {
+      "bytes": 794,
+      "group": "knapsack",
+      "note": "Pisinger uncorrelated, n=100, R=1000 (easiest family)",
+      "sha256": "e05b24ea5b60e90ad38a2e4b46c87a73f197a5828b06b8bb298c9668ecfafed5",
+      "url": "https://raw.githubusercontent.com/likr/kplib/master/00Uncorrelated/n00100/R01000/s000.kp"
+    },
+    "knapsack/uncorrelated_n200_R1000.kp": {
+      "bytes": 1569,
+      "group": "knapsack",
+      "note": "Pisinger uncorrelated, n=200, R=1000",
+      "sha256": "16765095a4894c4d4261c9577a37b476ecd9064cc46433c534fb0151eb557aee",
+      "url": "https://raw.githubusercontent.com/likr/kplib/master/00Uncorrelated/n00200/R01000/s000.kp"
+    },
+    "knapsack/weakly_correlated_n100_R1000.kp": {
+      "bytes": 799,
+      "group": "knapsack",
+      "note": "Pisinger weakly correlated, n=100, R=1000",
+      "sha256": "8ea58441d86fdb3be8cb4c14f5950b19b1a5ee5642a682afcb44835892471b40",
+      "url": "https://raw.githubusercontent.com/likr/kplib/master/01WeaklyCorrelated/n00100/R01000/s000.kp"
+    },
+    "regression/airfoil_self_noise.dat": {
+      "bytes": 59984,
+      "group": "regression",
+      "note": "UCI Airfoil Self-Noise: 1503 rows, 5 features, target = sound pressure level",
+      "sha256": "74c75fd71783f1e6b71f8a622b993dc592897a97cd689c5090a07147a1b097b3",
+      "url": "https://archive.ics.uci.edu/ml/machine-learning-databases/00291/airfoil_self_noise.dat"
+    },
+    "regression/yacht_hydrodynamics.data": {
+      "bytes": 11487,
+      "group": "regression",
+      "note": "UCI Yacht Hydrodynamics: 308 rows, 6 features, target = residuary resistance",
+      "sha256": "00dfecc0fc01ddd4c90b558a3ac11b246df8ebcfea130724223475a9a67f0ea1",
+      "url": "https://archive.ics.uci.edu/ml/machine-learning-databases/00243/yacht_hydrodynamics.data"
+    },
+    "tsp/att48.tsp": {
+      "bytes": 738,
+      "group": "tsp",
+      "note": "48 US state capitals (Padberg/Rinaldi), ATT pseudo-Euclidean; known optimum 10628",
+      "sha256": "7a7b04423c4463e873ec5d1f0592ad4a5cba168018e3f4edfd7f7e541fde03ac",
+      "url": "https://raw.githubusercontent.com/mastqe/tsplib/master/att48.tsp"
+    },
+    "tsp/berlin52.tsp": {
+      "bytes": 916,
+      "group": "tsp",
+      "note": "52 locations in Berlin (Groetschel); known optimum 7542",
+      "sha256": "8496a5838133e3c3eb25a9fa8893b1ac302593fc8dc325350643a0cabd8abadc",
+      "url": "https://raw.githubusercontent.com/mastqe/tsplib/master/berlin52.tsp"
+    },
+    "tsp/eil51.tsp": {
+      "bytes": 579,
+      "group": "tsp",
+      "note": "51-city Christofides/Eilon instance; known optimum 426",
+      "sha256": "66c05ad077ffd64d5778e358bbd16be049f8c8ae880cbd24f034487331d1ccce",
+      "url": "https://raw.githubusercontent.com/mastqe/tsplib/master/eil51.tsp"
+    },
+    "tsp/kroA100.tsp": {
+      "bytes": 1345,
+      "group": "tsp",
+      "note": "100-city Krolak/Felts/Nelson instance A; known optimum 21282",
+      "sha256": "e103100c1cf31dfc06be95a9d04011b5a8753bb65a3339594ca34404e574bdf5",
+      "url": "https://raw.githubusercontent.com/mastqe/tsplib/master/kroA100.tsp"
+    }
+  },
+  "note": "Provenance for the third-party benchmark instances under benchmarks/data/. Regenerate with scripts/fetch_datasets.py; verify with --verify.",
+  "schema": 1
+}

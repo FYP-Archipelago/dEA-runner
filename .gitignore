@@ -1,0 +1,16 @@
+.venv/
+runs/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+*.zip
+CLAUDE.md
+tests
+docs
+
+# The downloaded benchmark instances ARE committed (~156 KB total), so a clone
+# gets byte-identical data without needing network access. That is deliberate:
+# searches in this harness are not reproducible, so the dataset is the only thing
+# that must be, and committing it removes any doubt.
+# Verify with: python scripts/fetch_datasets.py --verify
