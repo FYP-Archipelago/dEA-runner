@@ -1,0 +1,56 @@
+# PSO with the standard constriction parameter set (Bratton & Kennedy 2007) on
+# Ackley. Two distinct neighbourhood structures are in play -- the swarm's ring
+# and the archipelago's bidirectional ring -- which is a useful case for the
+# visualisation phase to be able to tell apart.
+
+description: "PSO (constriction, ring swarm topology), 5 islands, Ackley 10D."
+
+algorithm: pso
+algorithm_params:
+  topology: ring
+  neighbourhood_size: 2
+  constriction: true
+  cognitive: 2.05
+  social: 2.05
+  velocity_clamp: 0.5
+
+benchmark: ackley
+benchmark_params:
+  dimension: 10
+
+evaluation_budget: 100000
+target_generations: 200
+num_islands: 5
+
+termination:
+  stagnation_generations: 40
+  # Ackley's optimum is 0; stop early if an island essentially solves it rather
+  # than spending the rest of the budget refining the twelfth decimal place.
+  target_fitness: 1.0e-8
+  max_generations: 2000
+
+migration:
+  enabled: true
+  topology: bidirectional_ring
+  interval: 25
+  num_migrants: 3
+  selection: best
+  replacement: worst
+  fanout: one_random
+
+logging:
+  output_dir: runs
+  genome_mode: compact
+
+execution:
+  backend: docker      # the default; each island gets its own container
+
+docker:
+  image: archipelago-worker:latest
+  build: true          # built automatically if missing or older than the sources
+  dockerfile: docker/Dockerfile.worker
+  cpus: 1.0
+  memory: 2g
+  # Docker's builder VM may not inherit the host resolver, which shows up as pip
+  # being unable to reach PyPI. "host" fixes it and is harmless otherwise.
+  build_network: host

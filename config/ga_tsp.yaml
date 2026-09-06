@@ -1,0 +1,59 @@
+# Permutation GA on a real TSPLIB instance, with order crossover and inversion
+# mutation (inversion is a 2-opt move on a symmetric tour).
+#
+#   python scripts/fetch_datasets.py --only tsp
+#
+# berlin52's optimal tour length is 7542, so a run's result is directly
+# checkable against the literature. Swap in eil51 (optimum 426), att48 (10628)
+# or kroA100 (21282).
+
+description: "Permutation GA (OX + inversion), 5 islands, TSPLIB berlin52."
+
+algorithm: ga
+algorithm_params:
+  representation: permutation
+  selection: tournament
+  tournament_size: 5
+  crossover: order
+  crossover_rate: 0.9
+  mutation: inversion
+  mutation_rate: 0.3
+  elitism: 2
+
+benchmark: tsp
+benchmark_params:
+  instance_file: benchmarks/data/tsp/berlin52.tsp
+
+evaluation_budget: 100000
+target_generations: 300
+num_islands: 5
+
+termination:
+  stagnation_generations: 60
+  target_fitness: 7542.0     # the known optimum; stop if an island reaches it
+  max_generations: 3000
+
+migration:
+  enabled: true
+  topology: lattice       # open chain: the two end islands have a single neighbour
+  interval: 30
+  num_migrants: 4
+  selection: best
+  replacement: worst
+
+logging:
+  output_dir: runs
+  genome_mode: compact
+
+execution:
+  backend: docker      # the default; each island gets its own container
+
+docker:
+  image: archipelago-worker:latest
+  build: true          # built automatically if missing or older than the sources
+  dockerfile: docker/Dockerfile.worker
+  cpus: 1.0
+  memory: 2g
+  # Docker's builder VM may not inherit the host resolver, which shows up as pip
+  # being unable to reach PyPI. "host" fixes it and is harmless otherwise.
+  build_network: host

@@ -1,0 +1,62 @@
+# Self-adaptive (mu, lambda)-ES on Schwefel, whose global optimum sits near a
+# bound and far from the second-best basin -- the case where comma selection's
+# ability to abandon a shrunken step size matters most.
+#
+# NOTE the population arithmetic: population_size is mu, and each generation
+# evaluates lambda = offspring_per_parent x mu. The budget derivation accounts
+# for that, so this run still totals ~100,000 evaluations like the others -- it
+# just reaches them with a much smaller parent population.
+
+description: "Self-adaptive (mu,lambda)-ES, 5 islands, Schwefel 10D, star topology."
+
+algorithm: es
+algorithm_params:
+  selection: comma
+  offspring_per_parent: 7
+  sigma_mode: n_sigma
+  recombination: discrete
+  strategy_recombination: intermediate
+  rho: 2
+  initial_sigma_ratio: 0.1
+
+benchmark: schwefel
+benchmark_params:
+  dimension: 10
+
+evaluation_budget: 100000
+target_generations: 200
+num_islands: 5
+
+termination:
+  stagnation_generations: 40
+  max_generations: 2000
+
+migration:
+  # A star makes one island a hub and the rest spokes, producing a strongly
+  # asymmetric source/sink structure -- the most demanding test of whether the
+  # migration edges actually reveal the communication structure.
+  enabled: true
+  topology: star
+  topology_params:
+    hub: 0
+  interval: 15
+  num_migrants: 3
+  selection: diverse
+  replacement: similar
+
+logging:
+  output_dir: runs
+  genome_mode: compact
+
+execution:
+  backend: docker      # the default; each island gets its own container
+
+docker:
+  image: archipelago-worker:latest
+  build: true          # built automatically if missing or older than the sources
+  dockerfile: docker/Dockerfile.worker
+  cpus: 1.0
+  memory: 2g
+  # Docker's builder VM may not inherit the host resolver, which shows up as pip
+  # being unable to reach PyPI. "host" fixes it and is harmless otherwise.
+  build_network: host

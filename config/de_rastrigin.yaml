@@ -1,0 +1,64 @@
+# DE/rand/1/bin on a shifted Rastrigin -- the reference continuous run. Shifted
+# rather than plain, so the optimum is not at the origin and an algorithm cannot
+# score well by drifting toward zero. The shift is the official CEC2017 vector,
+# read from a data file: there is no generated substitute, so the problem is
+# identical in every run of this config.
+#
+#   python scripts/fetch_datasets.py --only cec
+
+description: "DE/rand/1/bin, 5 islands, CEC-shifted Rastrigin 10D, ring migration."
+
+algorithm: de
+algorithm_params:
+  strategy: rand/1
+  f: 0.5
+  cr: 0.9
+  bound_handling: midpoint
+
+benchmark: shifted_rotated
+benchmark_params:
+  function: rastrigin
+  dimension: 10
+  # Official CEC2017 shift vector; this also switches the search box to the CEC
+  # [-100, 100] domain the suite is defined on. Drop the line and the problem is
+  # plain Rastrigin on its classical domain -- never a randomly shifted stand-in.
+  # Add `rotation_file:` alongside it to rotate as well; no rotation matrix ships
+  # with this repo, so the run above is shifted but not rotated.
+  shift_file: benchmarks/data/cec/shift_data_3.txt
+
+# 100,000 evaluations across the archipelago: 20,000 per island, ~200 generations
+# of a 100-individual population, unless stagnation ends it sooner.
+evaluation_budget: 100000
+target_generations: 200
+num_islands: 5
+
+termination:
+  stagnation_generations: 40
+  max_generations: 2000
+
+migration:
+  enabled: true
+  topology: ring
+  interval: 20
+  num_migrants: 5
+  selection: best
+  replacement: worst
+  phase_jitter: 3      # break the artificial lockstep between islands
+
+logging:
+  output_dir: runs
+  genome_mode: compact
+  genome_precision_decimals: 4
+
+execution:
+  backend: docker      # the default; each island gets its own container
+
+docker:
+  image: archipelago-worker:latest
+  build: true          # built automatically if missing or older than the sources
+  dockerfile: docker/Dockerfile.worker
+  cpus: 1.0
+  memory: 2g
+  # Docker's builder VM may not inherit the host resolver, which shows up as pip
+  # being unable to reach PyPI. "host" fixes it and is harmless otherwise.
+  build_network: host

@@ -1,0 +1,57 @@
+# GA over bitstrings on a real strongly correlated 0/1 knapsack instance from
+# the Knapsack Problem Library -- Pisinger's hard family, where value density
+# carries almost no information.
+#
+#   python scripts/fetch_datasets.py --only knapsack
+
+description: "Binary GA, 5 islands, strongly correlated 0/1 knapsack (n=100, real instance)."
+
+algorithm: ga
+algorithm_params:
+  representation: binary
+  selection: tournament
+  tournament_size: 3
+  crossover: uniform
+  crossover_rate: 0.9
+  mutation_rate: null     # null => 1/L, one expected flip per genome
+  elitism: 2
+
+benchmark: knapsack
+benchmark_params:
+  instance_file: benchmarks/data/knapsack/strongly_correlated_n100_R1000.kp
+
+evaluation_budget: 100000
+target_generations: 200
+num_islands: 5
+
+termination:
+  stagnation_generations: 50   # combinatorial search plateaus and then jumps
+  max_generations: 2000
+
+migration:
+  enabled: true
+  topology: fully_connected
+  interval: 25
+  num_migrants: 2
+  selection: tournament
+  selection_params:
+    tournament_size: 4
+  replacement: worst
+  fanout: round_robin     # one neighbour per event, so migrant volume matches the ring configs
+
+logging:
+  output_dir: runs
+  genome_mode: compact
+
+execution:
+  backend: docker      # the default; each island gets its own container
+
+docker:
+  image: archipelago-worker:latest
+  build: true          # built automatically if missing or older than the sources
+  dockerfile: docker/Dockerfile.worker
+  cpus: 1.0
+  memory: 2g
+  # Docker's builder VM may not inherit the host resolver, which shows up as pip
+  # being unable to reach PyPI. "host" fixes it and is harmless otherwise.
+  build_network: host

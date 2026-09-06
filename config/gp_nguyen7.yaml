@@ -1,0 +1,62 @@
+# Koza-style tree GP on Nguyen-7, the standard synthetic symbolic-regression
+# benchmark. Genome mode is `full` because a tree's canonical prefix string is
+# both compact and directly readable -- there is nothing to gain from packing it,
+# and a readable expression in the dataset is worth a great deal.
+
+description: "Tree GP (Koza operators), 5 islands, Nguyen-7 symbolic regression."
+
+algorithm: gp
+algorithm_params:
+  function_set: koza
+  min_init_depth: 2
+  max_init_depth: 6
+  max_depth: 17
+  tournament_size: 7
+  crossover_rate: 0.9
+  subtree_mutation_rate: 0.05
+  point_mutation_rate: 0.03
+  hoist_mutation_rate: 0.02
+  internal_node_bias: 0.9
+  parsimony_coefficient: 0.001   # mild bloat control; affects selection only, never the logged fitness
+  elitism: 2
+
+benchmark: nguyen7
+benchmark_params:
+  instance_seed: 1
+  metric: rmse
+
+# GP needs a larger population than generations to keep structural diversity, so
+# the budget is spread over fewer, wider generations than the continuous configs.
+evaluation_budget: 100000
+target_generations: 100
+num_islands: 5
+
+termination:
+  stagnation_generations: 30
+  target_fitness: 1.0e-6     # effectively solved
+  max_generations: 1000
+
+migration:
+  enabled: true
+  topology: ring
+  interval: 10
+  num_migrants: 5
+  selection: best
+  replacement: worst
+
+logging:
+  output_dir: runs
+  genome_mode: full
+
+execution:
+  backend: docker      # the default; each island gets its own container
+
+docker:
+  image: archipelago-worker:latest
+  build: true          # built automatically if missing or older than the sources
+  dockerfile: docker/Dockerfile.worker
+  cpus: 1.0
+  memory: 2g
+  # Docker's builder VM may not inherit the host resolver, which shows up as pip
+  # being unable to reach PyPI. "host" fixes it and is harmless otherwise.
+  build_network: host

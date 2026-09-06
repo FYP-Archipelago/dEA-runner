@@ -1,0 +1,63 @@
+# Tree GP on real data: the UCI Yacht Hydrodynamics dataset, 308 rows and six
+# physical measurements predicting residuary resistance.
+#
+#   python scripts/fetch_datasets.py --only regression
+#
+# Real data rather than a synthetic target changes the problem in ways worth
+# having in the dataset: there is no exact expression to find, so fitness
+# plateaus at a non-zero error and the stagnation rule (rather than a target
+# fitness) is what ends the run.
+
+description: "Tree GP, 5 islands, UCI Yacht Hydrodynamics regression."
+
+algorithm: gp
+algorithm_params:
+  function_set: koza
+  max_init_depth: 5
+  max_depth: 12            # tighter than Koza's 17: real data invites bloat
+  tournament_size: 7
+  crossover_rate: 0.85
+  subtree_mutation_rate: 0.08
+  point_mutation_rate: 0.04
+  hoist_mutation_rate: 0.03
+  parsimony_coefficient: 0.01
+  elitism: 2
+
+benchmark: yacht
+benchmark_params:
+  metric: rmse
+
+# 1503-row datasets make each evaluation costlier, so the budget buys fewer,
+# larger generations. Yacht at 308 rows is the cheaper of the two real sets.
+evaluation_budget: 100000
+target_generations: 80
+num_islands: 5
+
+termination:
+  stagnation_generations: 25
+  max_generations: 800
+
+migration:
+  enabled: true
+  topology: ring
+  interval: 10
+  num_migrants: 5
+  selection: best
+  replacement: worst
+
+logging:
+  output_dir: runs
+  genome_mode: full
+
+execution:
+  backend: docker      # the default; each island gets its own container
+
+docker:
+  image: archipelago-worker:latest
+  build: true          # built automatically if missing or older than the sources
+  dockerfile: docker/Dockerfile.worker
+  cpus: 1.0
+  memory: 2g
+  # Docker's builder VM may not inherit the host resolver, which shows up as pip
+  # being unable to reach PyPI. "host" fixes it and is harmless otherwise.
+  build_network: host

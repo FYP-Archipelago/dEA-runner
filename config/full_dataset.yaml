@@ -1,0 +1,66 @@
+# The reference dataset-generation run: 100,000 evaluations across the whole
+# archipelago, on a real TSPLIB instance, ending when the islands stop improving.
+#
+# This is the configuration to use when the goal is *the dataset* rather than a
+# particular experiment. Everything is sized from `evaluation_budget`, so the
+# resulting evaluations.csv has a known number of rows regardless of which
+# algorithm or problem is swapped in.
+#
+#   python scripts/fetch_datasets.py
+#   python -m orchestrator.cli estimate --config config/full_dataset.yaml
+#   python -m orchestrator.cli run      --config config/full_dataset.yaml
+
+description: "Reference dataset run: 100,000 evaluations, 5 islands, TSPLIB kroA100."
+
+algorithm: ga
+algorithm_params:
+  representation: permutation
+  selection: tournament
+  tournament_size: 5
+  crossover: order
+  crossover_rate: 0.9
+  mutation: inversion
+  mutation_rate: 0.3
+  elitism: 2
+
+benchmark: tsp
+benchmark_params:
+  instance_file: benchmarks/data/tsp/kroA100.tsp
+
+evaluation_budget: 100000
+target_generations: 250
+num_islands: 5
+
+termination:
+  # Generous, because the point here is to fill the budget with useful search
+  # rather than to stop as soon as progress slows.
+  stagnation_generations: 100
+  max_generations: 5000
+  target_fitness: 21282.0    # kroA100's known optimum
+
+migration:
+  enabled: true
+  topology: ring
+  interval: 20
+  num_migrants: 5
+  selection: best
+  replacement: worst
+  phase_jitter: 4
+
+logging:
+  output_dir: runs
+  genome_mode: compact
+  genome_precision_decimals: 4
+
+execution:
+  backend: docker      # the default; each island gets its own container
+
+docker:
+  image: archipelago-worker:latest
+  build: true          # built automatically if missing or older than the sources
+  dockerfile: docker/Dockerfile.worker
+  cpus: 1.0
+  memory: 2g
+  # Docker's builder VM may not inherit the host resolver, which shows up as pip
+  # being unable to reach PyPI. "host" fixes it and is harmless otherwise.
+  build_network: host

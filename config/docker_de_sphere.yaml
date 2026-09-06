@@ -1,0 +1,54 @@
+# The quickest real Docker run: five islands, one container each, created
+# programmatically per run from these values. Use it to check that the container
+# path works before committing to one of the 100,000-evaluation configs.
+#
+#   python -m orchestrator.cli run --config config/docker_de_sphere.yaml
+#
+# The master builds the worker image itself. To build it by hand instead:
+#   docker build --network=host -f docker/Dockerfile.worker -t archipelago-worker:latest .
+
+description: "DE on Sphere, 5 islands, one Docker container per island."
+
+algorithm: de
+benchmark: sphere
+benchmark_params:
+  dimension: 10
+
+# Deliberately smaller than the 100,000 the local configs use: container startup
+# dominates a short run, and this config exists to prove the backend works.
+evaluation_budget: 20000
+target_generations: 60
+num_islands: 5
+
+termination:
+  stagnation_generations: 20
+  max_generations: 500
+
+migration:
+  enabled: true
+  topology: ring
+  interval: 5
+  num_migrants: 3
+  selection: best
+  replacement: worst
+
+logging:
+  output_dir: runs
+  genome_mode: compact
+
+execution:
+  backend: docker      # the default; each island gets its own container
+  # The master binds 0.0.0.0 automatically under this backend, and workers reach
+  # it at host.docker.internal (mapped to host-gateway on every container).
+  connect_timeout_seconds: 120.0   # containers start slower than subprocesses
+
+docker:
+  image: archipelago-worker:latest
+  build: true          # built automatically if missing or older than the sources
+  dockerfile: docker/Dockerfile.worker
+  cpus: 1.0
+  memory: 2g
+  auto_remove: true    # set false to keep a container around for `docker logs`
+  # Docker's builder VM may not inherit the host resolver, which shows up as pip
+  # being unable to reach PyPI. "host" fixes it and is harmless otherwise.
+  build_network: host
