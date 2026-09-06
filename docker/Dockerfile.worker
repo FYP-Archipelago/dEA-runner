@@ -1,0 +1,36 @@
+# Island worker image.
+# Build:
+#   docker build -f docker/Dockerfile.worker -t archipelago-worker:latest .
+#
+# The master builds it automatically when docker.build is true.
+
+FROM python:3.12-slim
+
+# Fail fast and log promptly: an island's stdout is a post-mortem artefact, and
+# buffered output would be lost when a container is killed.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/archipelago \
+    IN_ARCHIPELAGO_CONTAINER=1
+
+WORKDIR /archipelago
+
+COPY requirements-worker.txt ./
+RUN pip install --no-cache-dir -r requirements-worker.txt
+
+COPY archipelago_logging/ ./archipelago_logging/
+COPY algorithms/ ./algorithms/
+COPY benchmarks/ ./benchmarks/
+COPY orchestrator/ ./orchestrator/
+
+# Run as an unprivileged user. The run's output directory is bind-mounted from
+# the host, so this uid must be able to write there; the master creates the
+# directory before launching any container.
+RUN useradd --create-home --uid 1000 archipelago \
+    && chown -R archipelago:archipelago /archipelago
+USER archipelago
+
+# Overridden by the master with the island id, run id, config path and control
+# address. Present so `docker run archipelago-worker:latest --help` is useful.
+ENTRYPOINT ["python", "-m", "orchestrator.worker"]
+CMD ["--help"]
