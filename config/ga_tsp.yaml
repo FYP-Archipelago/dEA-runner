@@ -44,6 +44,19 @@ migration:
 logging:
   output_dir: runs
   genome_mode: compact
+  # Live TCP stream of the run's COMPLETE output to an external consumer:
+  # every run.jsonl event, every evaluations.csv row, and the final summary.
+  # Receive it with:
+  #   python scripts/stream_receiver.py --port 9900
+  # The stream comes from the master, not the islands. Running `cli run` from a
+  # shell keeps the master on the host even under this backend -- only the
+  # workers are containers -- so 127.0.0.1 is correct. Set host.docker.internal
+  # only when the master itself runs in a container (docker/Dockerfile.master).
+  # A missing listener degrades the stream only: the run and its files are fine.
+  live_stream:
+    enabled: false
+    host: 127.0.0.1
+    port: 9900
 
 execution:
   backend: docker      # the default; each island gets its own container

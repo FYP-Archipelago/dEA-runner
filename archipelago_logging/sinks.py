@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import json
 import io
 import os
 import queue
@@ -23,6 +24,7 @@ __all__ = [
     "CsvFileSink",
     "NetworkSink",
     "MultiSink",
+    "EnvelopeSink",
 ]
 
 
@@ -369,3 +371,33 @@ class MultiSink(Sink):
             }
             for index, sink in enumerate(self.sinks)
         }
+
+class EnvelopeSink(Sink):
+    """Wraps each line in a one-line JSON envelope and forwards it to another sink.
+
+    Lets one connection carry several kinds of record. ``json_body`` splices a
+    line that is already a JSON object in as a nested value, avoiding a decode
+    and re-encode; otherwise the line is embedded as a JSON string.
+    """
+
+    def __init__(self, target: Sink, kind: str, field: str, *, json_body: bool = False) -> None:
+        super().__init__()
+        self.target = target
+        self.kind = kind
+        self.field = field
+        self.json_body = json_body
+        self._prefix = '{"kind":"' + kind + '","' + field + '":'
+
+    def write(self, line: str) -> None:
+        """Envelope the line and hand it to the target sink."""
+        body = line if self.json_body else json.dumps(line)
+        self.target.write(self._prefix + body + "}")
+        self.stats.written += 1
+
+    def flush(self) -> None:
+        """Flush the target."""
+        self.target.flush()
+
+    def close(self) -> None:
+        """Closing an envelope does not close the shared target."""
+        self.flush()

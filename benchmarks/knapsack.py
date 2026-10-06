@@ -1,4 +1,4 @@
-"""0/1 Knapsack: OR-Library / Pisinger instance files."""
+"""0/1 Knapsack: kplib instance files."""
 
 from __future__ import annotations
 
@@ -52,10 +52,12 @@ def load_knapsack_file(path: str | Path) -> KnapsackInstance:
         raise ValueError(f"{path}: empty instance file")
 
     if re.match(r"^n\s+\d+", lines[1] if len(lines) > 1 else "", flags=re.IGNORECASE):
-        return _parse_pisinger(lines, path)
-    if len(lines) > 1 and len(re.split(r"[\s,]+", lines[0])) == 1:
-        return _parse_kplib(lines, path)
-    return _parse_plain(lines, path)
+        raise ValueError(
+            f"{path}: looks like a Pisinger-format instance (an 'n <count>' header). Only the "
+            "kplib layout is supported: the item count on the first line, the capacity on the "
+            "second, then one 'value weight' pair per line."
+        )
+    return _parse_kplib(lines, path)
 
 
 def _parse_kplib(lines: list[str], path: Path) -> KnapsackInstance:
@@ -88,72 +90,6 @@ def _parse_kplib(lines: list[str], path: Path) -> KnapsackInstance:
         name=path.stem,
         source=f"file:{path}",
     )
-
-
-def _parse_pisinger(lines: list[str], path: Path) -> KnapsackInstance:
-    name = lines[0]
-    header: dict[str, float] = {}
-    item_start = 1
-    for index in range(1, min(len(lines), 8)):
-        match = re.match(r"^([a-zA-Z]+)\s+(-?\d+(?:\.\d+)?)$", lines[index])
-        if match is None:
-            item_start = index
-            break
-        header[match.group(1).lower()] = float(match.group(2))
-        item_start = index + 1
-
-    if "n" not in header or "c" not in header:
-        raise ValueError(f"{path}: Pisinger-format file missing 'n' or 'c' header")
-
-    count = int(header["n"])
-    values: list[float] = []
-    weights: list[float] = []
-    for line in lines[item_start : item_start + count]:
-        parts = re.split(r"[\s,]+", line)
-        if len(parts) < 3:
-            raise ValueError(f"{path}: malformed item line {line!r}; expected 'index value weight'")
-        values.append(float(parts[1]))
-        weights.append(float(parts[2]))
-
-    if len(values) != count:
-        raise ValueError(f"{path}: header declares n={count} but {len(values)} item lines were read")
-
-    return KnapsackInstance(
-        values=np.array(values),
-        weights=np.array(weights),
-        capacity=header["c"],
-        name=name or path.stem,
-        optimum=header.get("z"),
-        source=f"file:{path}",
-    )
-
-
-def _parse_plain(lines: list[str], path: Path) -> KnapsackInstance:
-    head = re.split(r"[\s,]+", lines[0])
-    if len(head) < 2:
-        raise ValueError(f"{path}: first line must be 'n capacity'")
-    count, capacity = int(float(head[0])), float(head[1])
-
-    values: list[float] = []
-    weights: list[float] = []
-    for line in lines[1 : count + 1]:
-        parts = re.split(r"[\s,]+", line)
-        if len(parts) < 2:
-            raise ValueError(f"{path}: malformed item line {line!r}; expected 'value weight'")
-        values.append(float(parts[0]))
-        weights.append(float(parts[1]))
-
-    if len(values) != count:
-        raise ValueError(f"{path}: header declares n={count} but {len(values)} item lines were read")
-
-    return KnapsackInstance(
-        values=np.array(values),
-        weights=np.array(weights),
-        capacity=capacity,
-        name=path.stem,
-        source=f"file:{path}",
-    )
-
 
 class Knapsack(BinaryProblem):
     """0/1 Knapsack as a binary-encoded maximisation problem."""

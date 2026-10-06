@@ -59,6 +59,7 @@ from .reader import (
 from .sinks import (
     CallbackSink,
     CsvFileSink,
+    EnvelopeSink,
     JsonlFileSink,
     MultiSink,
     NetworkSink,
@@ -115,6 +116,7 @@ __all__ = [
     "TextLineFileSink",
     "JsonlFileSink",
     "CsvFileSink",
+    "EnvelopeSink",
     "NetworkSink",
     "MultiSink",
     "iter_events",

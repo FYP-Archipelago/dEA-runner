@@ -65,10 +65,15 @@ benchmark_params:
   instance_file: benchmarks/data/knapsack/strongly_correlated_n100_R1000.kp
 ```
 
-Three layouts parse, distinguished automatically: **kplib** (`.kp`, count and
-capacity on separate lines, then `value weight` pairs — what these files use),
-**Pisinger** (`n`/`c`/`z` header, then `index value weight`), and **OR-Library /
-plain** (`n capacity`, then `value weight`).
+One layout parses: **kplib** (`.kp`, the item count and the capacity on separate
+lines, then one `value weight` pair per line) — what these files use. A file in
+Pisinger's own layout (`n`/`c`/`z` header, then `index value weight`) is detected
+and rejected by name rather than misparsed.
+
+Note that kplib files carry no optimum, so `known_optimum` is `None` for every
+instance here and results cannot be reported as an optimality gap. Pisinger's own
+distribution does carry it, in the `z` header — switching source would be the way
+to recover that.
 
 Source: the Knapsack Problem Library (`likr/kplib`), generated per
 D. Pisinger, "Where are the hard knapsack problems?", *Computers & Operations
