@@ -39,7 +39,6 @@ class EventLogger:
         evaluation_sink: Sink | None = None,
         island_id: int | None = None,
         node_id: str | None = None,
-        validate: bool = True,
     ) -> None:
         self.run_id = run_id
         self.emitter = emitter
@@ -47,10 +46,9 @@ class EventLogger:
         self.evaluation_sink: Sink | None = evaluation_sink
         self.island_id = island_id
         self.node_id = node_id
-        self.validate = validate
 
         self._seq = 0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._eval_index = 0
         self._counts: dict[str, int] = {}
 
@@ -101,9 +99,9 @@ class EventLogger:
             fields["seq"] = self._seq
             fields["t_wall"] = wall_now()
             fields["t_mono_ns"] = mono_ns()
-            self._seq += 1
 
-            event = model(**fields) if self.validate else model.model_construct(**fields)
+            event = model(**fields)
+            self._seq += 1
             type_name = getattr(event, "type", model.__name__)
             self._counts[type_name] = self._counts.get(type_name, 0) + 1
 
@@ -145,25 +143,24 @@ class EventLogger:
     ) -> EvaluationEvent:
         """Emit one ``evaluation`` record."""
         with self._lock:
-            eval_index = self._eval_index
+            event = self.emit(
+                EvaluationEvent,
+                individual_id=individual_id,
+                parent_ids=list(parent_ids or []),
+                operator=operator,
+                fitness=float(fitness),
+                generation=generation,
+                eval_index=self._eval_index,
+                genome_encoding=genome.encoding.value,
+                genome_hash=genome.genome_hash,
+                genome_repr=genome.genome_repr,
+                genome_repr_mode=genome.genome_repr_mode.value,
+                genome_precision_decimals=genome.precision_decimals,
+                genome_dim=genome.dim,
+                **fields,
+            )
             self._eval_index += 1
-
-        return self.emit(
-            EvaluationEvent,
-            individual_id=individual_id,
-            parent_ids=list(parent_ids or []),
-            operator=operator,
-            fitness=float(fitness),
-            generation=generation,
-            eval_index=eval_index,
-            genome_encoding=genome.encoding.value,
-            genome_hash=genome.genome_hash,
-            genome_repr=genome.genome_repr,
-            genome_repr_mode=genome.genome_repr_mode.value,
-            genome_precision_decimals=genome.precision_decimals,
-            genome_dim=genome.dim,
-            **fields,
-        )
+        return event
 
     def generation_end(self, **fields: Any) -> GenerationEndEvent:
         """Emit one generation's summary."""

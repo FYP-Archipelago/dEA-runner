@@ -160,7 +160,6 @@ class IslandRunner:
             evaluation_sink=self.evaluation_sink,
             island_id=island_id,
             node_id=self.node_id,
-            validate=config.logging.validate_events,
         )
 
         self.control: ControlClient | None = None

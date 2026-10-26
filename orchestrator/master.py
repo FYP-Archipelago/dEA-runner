@@ -183,7 +183,6 @@ class Master:
             self.run_id,
             "master",
             self.aggregate_sink,
-            validate=self.config.logging.validate_events,
         )
 
         termination = TerminationReason.COMPLETED.value

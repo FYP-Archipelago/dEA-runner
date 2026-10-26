@@ -98,10 +98,6 @@ class LoggingConfig(_Base):
         le=15,
         description="Rounding used to form the location signature of real-valued genomes. Hashes from runs with different precision are not comparable.",
     )
-    validate_events: bool = Field(
-        default=True,
-        description="Validate every event against its Pydantic model before writing. Costs a few microseconds per record; disable only for long sweeps whose configuration has already passed a validated smoke run.",
-    )
     flush_interval_seconds: float = Field(default=2.0, ge=0.0)
     network_queue_size: int = Field(
         default=100_000,
