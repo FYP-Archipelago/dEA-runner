@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from archipelago_logging.genome import DEFAULT_PRECISION_DECIMALS, GenomeLogMode
+from archipelago_logging.ids import check_run_id
 from archipelago_logging.version import HARNESS_VERSION, SCHEMA_VERSION
 
 __all__ = [
@@ -183,7 +184,10 @@ class DockerConfig(_Base):
 class RunConfig(_Base):
     """The complete, validated description of one dEA run."""
 
-    run_id: str | None = Field(default=None, description="Auto-generated when absent.")
+    run_id: str | None = Field(
+        default=None,
+        description="Supplied by the caller, or minted when absent. Must look like run-YYYYMMDDTHHMMSSZ-xxxxxxxx; container and network names are built from its last 8 hex digits.",
+    )
     description: str = Field(default="", description="Free-text note carried into run_start.")
     seed: int | None = Field(
         default=None,
@@ -225,6 +229,12 @@ class RunConfig(_Base):
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     docker: DockerConfig = Field(default_factory=DockerConfig)
 
+
+    @field_validator("run_id")
+    @classmethod
+    def _run_id_shape(cls, run_id: str | None) -> str | None:
+        """A supplied run id must have the shape the harness mints."""
+        return run_id if run_id is None else check_run_id(run_id)
 
     @model_validator(mode="after")
     def _validate(self) -> "RunConfig":

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 __all__ = [
     "new_run_id",
+    "check_run_id",
     "IndividualIdMinter",
     "MigrationIdMinter",
     "ParsedIndividualId",
@@ -17,12 +18,29 @@ __all__ = [
 ]
 
 _INDIVIDUAL_RE = re.compile(r"^i(?P<island>\d{2,})-g(?P<generation>\d{6,})-n(?P<ordinal>\d{9,})$")
+_RUN_ID_RE = re.compile(r"^run-(?P<stamp>\d{8}T\d{6}Z)-[0-9a-f]{8}$")
+_RUN_ID_STAMP = "%Y%m%dT%H%M%SZ"
 
 
 def new_run_id() -> str:
     """Mint a run id: UTC timestamp for sortability plus 8 hex chars for uniqueness."""
-    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    stamp = time.strftime(_RUN_ID_STAMP, time.gmtime())
     return f"run-{stamp}-{os.urandom(4).hex()}"
+
+
+def check_run_id(run_id: str) -> str:
+    """Return ``run_id`` unchanged if it has the shape :func:`new_run_id` mints, else raise."""
+    match = _RUN_ID_RE.match(run_id)
+    try:
+        valid = match is not None and bool(time.strptime(match.group("stamp"), _RUN_ID_STAMP))
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ValueError(
+            f"run_id {run_id!r} must look like run-YYYYMMDDTHHMMSSZ-xxxxxxxx: a valid UTC "
+            "timestamp and 8 lowercase hex digits, e.g. run-20261026T120000Z-0123abcd"
+        )
+    return run_id
 
 
 class IndividualIdMinter:

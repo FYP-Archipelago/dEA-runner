@@ -158,6 +158,11 @@ class Master:
     def run(self) -> RunSummary:
         """Execute the run and return its summary."""
         started = time.monotonic()
+        if self.output_dir.exists() and any(self.output_dir.iterdir()):
+            raise FileExistsError(
+                f"run_id {self.run_id!r} has already been used: {self.output_dir} holds its "
+                "output, and this run would be appended to it. Choose a new run_id."
+            )
         self.output_dir.mkdir(parents=True, exist_ok=True)
         (self.output_dir / "islands").mkdir(parents=True, exist_ok=True)
         self.output_dir.chmod(0o777)

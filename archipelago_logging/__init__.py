@@ -39,6 +39,7 @@ from .genome import (
 from .ids import (
     IndividualIdMinter,
     MigrationIdMinter,
+    check_run_id,
     new_run_id,
     parse_individual_id,
 )
@@ -102,6 +103,7 @@ __all__ = [
     "decode_compact",
     "DEFAULT_PRECISION_DECIMALS",
     "new_run_id",
+    "check_run_id",
     "IndividualIdMinter",
     "MigrationIdMinter",
     "parse_individual_id",
