@@ -282,9 +282,22 @@ class RunConfig(_Base):
                     f"unknown migrant replacement policy {self.migration.replacement!r}; "
                     f"available: {sorted(REPLACEMENT_POLICIES)}"
                 )
-            build_topology(
+            topology = build_topology(
                 self.migration.topology, self.num_islands, **self.migration.topology_params
             )
+            if self.migration.topology.lower() == "torus" and all(
+                len(neighbours) <= 2 for neighbours in topology.values()
+            ):
+                rows = self.migration.topology_params.get("rows")
+                grid = f"{self.num_islands} islands" + (
+                    f" in {rows} row{'s' if rows != 1 else ''}" if rows else ""
+                )
+                raise ValueError(
+                    f"a torus of {grid} gives every island only two neighbours, which makes it "
+                    "identical to bidirectional_ring, so the log would record a torus that "
+                    "never ran. A torus needs at least a 2x3 grid: num_islands: 6, in 2 or 3 "
+                    "rows. For 4 or 5 islands, use bidirectional_ring."
+                )
             resolved_population = self.resolved_population_size()
             if self.migration.num_migrants >= resolved_population:
                 raise ValueError(
