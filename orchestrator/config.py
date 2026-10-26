@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from archipelago_logging.genome import DEFAULT_PRECISION_DECIMALS, GenomeLogMode
 from archipelago_logging.version import HARNESS_VERSION, SCHEMA_VERSION
@@ -104,17 +104,6 @@ class LoggingConfig(_Base):
         ge=1000,
         description="Per-island outbound log queue. On overflow, records are dropped and counted rather than back-pressuring the evolutionary loop.",
     )
-
-    @field_validator("genome_mode")
-    @classmethod
-    def _genome_body_required(cls, mode: GenomeLogMode) -> GenomeLogMode:
-        """Reject a mode that writes no genome body."""
-        if mode is GenomeLogMode.HASHED:
-            raise ValueError(
-                "hashed writes no genome body, so the clustering module cannot place the "
-                "rows; use compact (the default) or full"
-            )
-        return mode
 
 
 class TerminationConfig(_Base):

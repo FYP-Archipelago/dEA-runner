@@ -64,12 +64,11 @@ from .sinks import (
     Sink,
     TextLineFileSink,
 )
-from .version import HARNESS_VERSION, SCHEMA_VERSION, is_compatible
+from .version import HARNESS_VERSION, SCHEMA_VERSION
 
 __all__ = [
     "SCHEMA_VERSION",
     "HARNESS_VERSION",
-    "is_compatible",
     "EventLogger",
     "EventType",
     "Operator",

@@ -17,7 +17,7 @@ from .events import (
     evaluation_from_csv_row,
     parse_event,
 )
-from .version import is_compatible
+from .version import SCHEMA_VERSION
 
 __all__ = [
     "iter_lines",
@@ -102,10 +102,11 @@ def iter_events(
             continue
 
         version = record.get("schema_version", "")
-        if not is_compatible(version):
+        if version != SCHEMA_VERSION:
             if strict:
                 raise LogValidationError(
-                    f"{path}:{index + 1}: incompatible schema_version {version!r}"
+                    f"{path}:{index + 1}: schema_version {version!r}; this reader reads "
+                    f"{SCHEMA_VERSION} only"
                 )
             continue
 

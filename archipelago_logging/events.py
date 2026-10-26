@@ -65,7 +65,6 @@ class Operator(str, Enum):
     MIGRATION_ARRIVAL = "migration_arrival"
     ELITE_COPY = "elite_copy"
     CLONE = "clone"
-    REEVALUATION = "reevaluation"
 
 
 class TerminationReason(str, Enum):
@@ -79,13 +78,11 @@ class TerminationReason(str, Enum):
     TIME_LIMIT = "time_limit"
     ERROR = "error"
     ABORTED = "aborted"
-    INSUFFICIENT_ISLANDS = "insufficient_islands"
 
 
 class DiagnosticLevel(str, Enum):
     """Severity of a diagnostic record."""
 
-    DEBUG = "debug"
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -94,7 +91,7 @@ class DiagnosticLevel(str, Enum):
 class BaseEvent(BaseModel):
     """Fields present on every record in the stream."""
 
-    model_config = ConfigDict(extra="allow", use_enum_values=True, validate_assignment=False)
+    model_config = ConfigDict(extra="forbid", use_enum_values=True, validate_assignment=False)
 
     schema_version: str = Field(
         default=SCHEMA_VERSION,
@@ -154,10 +151,7 @@ class RunStartEvent(BaseEvent):
         description="The generation count the population size was derived to land near. A target, not a limit: a run normally ends on stagnation before reaching it.",
     )
     max_generations: int = Field(description="Safety cap on generations.")
-    backend: str = Field(
-        description="Execution backend that launched the islands: 'docker'. Logs written "
-        "before the local backend was removed may say 'local'."
-    )
+    backend: str = Field(description="Execution backend that launched the islands: 'docker'.")
     datasets: dict[str, Any] = Field(
         default_factory=dict,
         description="Provenance of the benchmark instance actually used: name, source (file path or generator), and the SHA-256 of the instance file where there is one.",
@@ -299,9 +293,7 @@ class EvaluationEvent(BaseEvent):
     genome_repr: Any | None = Field(
         default=None, description="Genome body; interpretation depends on genome_repr_mode."
     )
-    genome_repr_mode: str = Field(
-        default="hashed", description="'hashed' | 'compact' | 'full'. See archipelago_logging.genome."
-    )
+    genome_repr_mode: str = Field(description="'compact' | 'full'. See archipelago_logging.genome.")
     genome_precision_decimals: int | None = Field(
         default=None,
         description="Rounding used to form the signature for real encodings. Hashes from runs with different precision are NOT comparable.",
@@ -453,8 +445,6 @@ _ADAPTER: TypeAdapter[Any] = TypeAdapter(AnyEvent)
 
 def parse_event(record: dict[str, Any]) -> BaseEvent:
     """Validate one decoded JSON object into its typed event model."""
-    if record.get("type") not in EVENT_MODELS:
-        return BaseEvent.model_validate(record)
     return _ADAPTER.validate_python(record)
 
 
@@ -500,10 +490,10 @@ def evaluation_csv_schema() -> dict[str, Any]:
             "boolean": "1 for true, 0 for false, empty for unknown",
             "parent_ids": f"{PARENT_ID_SEPARATOR!r}-separated list; empty for an initial individual",
             "genome_repr": (
-                "interpretation depends on genome_repr_mode: absent for 'hashed', a base64 "
-                "string for 'compact' (see archipelago_logging.decode_compact), JSON for "
-                "'full'. Composite encodings (real_vector_velocity, real_vector_sigma) are "
-                "JSON objects in both non-hashed modes."
+                "interpretation depends on genome_repr_mode: a base64 string for 'compact' "
+                "(see archipelago_logging.decode_compact), JSON for 'full'. Composite "
+                "encodings (real_vector_velocity, real_vector_sigma) are JSON objects in "
+                "both modes."
             ),
             "quoting": "RFC 4180 (csv.QUOTE_MINIMAL); read with Python's csv module or pandas",
         },
@@ -585,7 +575,7 @@ def _csv_bool(text: str) -> bool | None:
 def evaluation_from_csv_row(row: dict[str, str]) -> EvaluationEvent:
     """Rebuild an :class:`EvaluationEvent` from one parsed CSV row."""
     representation: Any = row.get("genome_repr") or None
-    mode = row.get("genome_repr_mode") or "hashed"
+    mode = row["genome_repr_mode"]
     if representation is not None and mode != "compact":
         try:
             representation = json.loads(representation)
