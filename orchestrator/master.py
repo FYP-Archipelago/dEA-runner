@@ -12,13 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from archipelago_logging import (
-    EVALUATION_CSV_COLUMNS,
     EVALUATION_CSV_HEADER,
     CsvFileSink,
     EventLogger,
-    EnvelopeSink,
-    MultiSink,
-    NetworkSink,
     JsonlFileSink,
     Sink,
     TerminationReason,
@@ -27,8 +23,6 @@ from archipelago_logging import (
     new_run_id,
 )
 from archipelago_logging.version import HARNESS_VERSION, SCHEMA_VERSION
-
-STREAM_PROTOCOL_VERSION = "1.1"
 
 from .backends import DockerBackend, ExecutionBackend, LocalBackend, WorkerSpec
 from .config import RunConfig
@@ -122,7 +116,6 @@ class Master:
 
         self.aggregate_sink: Sink | None = None
         self.evaluation_sink: Sink | None = None
-        self.stream_sink: NetworkSink | None = None
         self.logger: EventLogger | None = None
         self.server: ControlServer | None = None
         self.backend: ExecutionBackend | None = None
@@ -152,54 +145,6 @@ class Master:
             python_executable=self.config.execution.worker_python,
             repository_root=self.repository_root,
         )
-
-    def _make_stream_sink(self) -> "NetworkSink | None":
-        """Open the live stream, or return None when it is not configured."""
-        stream = self.config.logging.live_stream
-        if not stream.enabled:
-            return None
-        hello = (
-            json.dumps(
-                {
-                    "kind": "hello",
-                    "protocol": STREAM_PROTOCOL_VERSION,
-                    "run_id": self.run_id,
-                    "schema_version": SCHEMA_VERSION,
-                    "harness_version": HARNESS_VERSION,
-                    "algorithm": self.config.algorithm,
-                    "benchmark": self.config.benchmark,
-                    "num_islands": self.config.num_islands,
-                    "evaluation_columns": list(EVALUATION_CSV_COLUMNS),
-                    "started_at": iso_now(),
-                }
-            )
-            + "\n"
-        )
-        return NetworkSink(
-            stream.host,
-            stream.port,
-            queue_size=stream.queue_size,
-            connect_timeout=stream.connect_timeout_seconds,
-            max_reconnect_attempts=stream.max_reconnect_attempts,
-            handshake=hello,
-        )
-
-    def _send_artifact(self, relative_path: str, text: str) -> None:
-        """Mirror a file the master wrote, so a receiver can reproduce it verbatim."""
-        if self.stream_sink is None:
-            return
-        self.stream_sink.write(
-            json.dumps({"kind": "artifact", "path": relative_path, "content": text})
-        )
-
-    def _send_stream_tail(self, summary_payload: dict[str, Any]) -> None:
-        """Close the stream with the run summary, mirroring summary.json."""
-        if self.stream_sink is None:
-            return
-        self.stream_sink.write(
-            json.dumps({"kind": "summary", "summary": summary_payload}, default=str)
-        )
-        self.stream_sink.write(json.dumps({"kind": "bye", "run_id": self.run_id}))
 
     def _bind_address(self) -> tuple[str, int]:
         """Where the master listens."""
@@ -231,9 +176,6 @@ class Master:
             self.output_dir.chmod(0o777)
             (self.output_dir / "islands").chmod(0o777)
         config_path = self.config.write_resolved(self.output_dir / "resolved_config.yaml")
-        self._pending_artifacts: list[tuple[str, str]] = [
-            ("resolved_config.yaml", config_path.read_text(encoding="utf-8"))
-        ]
 
         compress = self.config.logging.compress
         gz = ".gz" if compress else ""
@@ -242,41 +184,24 @@ class Master:
             aggregate_path = self.output_dir / f"run.jsonl{gz}"
         else:
             aggregate_path = self.output_dir / f"master.jsonl{gz}"
-        self.stream_sink = self._make_stream_sink()
-        for relative, text in self._pending_artifacts:
-            self._send_artifact(relative, text)
-        self._pending_artifacts.clear()
 
-        aggregate_file: Sink = JsonlFileSink(
+        self.aggregate_sink = JsonlFileSink(
             aggregate_path,
             compress=compress,
             flush_interval_seconds=self.config.logging.flush_interval_seconds,
-        )
-        self.aggregate_sink = (
-            MultiSink(
-                [aggregate_file, EnvelopeSink(self.stream_sink, "event", "record", json_body=True)]
-            )
-            if self.stream_sink is not None
-            else aggregate_file
         )
 
         evaluations_path: Path | None = None
         if self.config.logging.stream_to_master and self.config.logging.log_evaluations:
             evaluations_path = self.output_dir / f"evaluations.csv{gz}"
-            file_sink: Sink = CsvFileSink(
+            self.evaluation_sink = CsvFileSink(
                 evaluations_path,
                 header=EVALUATION_CSV_HEADER,
                 compress=compress,
                 flush_interval_seconds=self.config.logging.flush_interval_seconds,
             )
-            self.evaluation_sink = (
-                MultiSink([file_sink, EnvelopeSink(self.stream_sink, "evaluation", "row")])
-                if self.stream_sink is not None
-                else file_sink
-            )
             schema_text = json.dumps(evaluation_csv_schema(), indent=2) + "\n"
             (self.output_dir / "evaluations.schema.json").write_text(schema_text, encoding="utf-8")
-            self._send_artifact("evaluations.schema.json", schema_text)
 
         self.logger = EventLogger(
             self.run_id,
@@ -425,24 +350,6 @@ class Master:
                 self.backend.stop_all(self.config.execution.shutdown_grace_seconds)
                 return TerminationReason.TIME_LIMIT.value
 
-    def _send_island_artifacts(self) -> None:
-        """Mirror each island's own files: its result, and whatever it wrote to stderr."""
-        if self.stream_sink is None:
-            return
-        for island_id in range(self.config.num_islands):
-            for name in (
-                f"island-{island_id:02d}.result.json",
-                f"island-{island_id:02d}.stderr.log",
-            ):
-                path = self.output_dir / "islands" / name
-                if not path.exists():
-                    continue
-                try:
-                    text = path.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    continue
-                self._send_artifact(f"islands/{name}", text)
-
     def _collect_results(self) -> list[dict[str, Any]]:
         """Read each island's result file. Every island writes one, on every path."""
         results: list[dict[str, Any]] = []
@@ -525,17 +432,6 @@ class Master:
                     "algorithm_summary": result.get("algorithm_summary"),
                 }
 
-        if self.logger is not None and self.stream_sink is not None and self.stream_sink.stats.degraded:
-            stream = self.config.logging.live_stream
-            self.logger.diagnostic(
-                "the live evaluation stream is degraded; rows are being dropped rather than "
-                "delivered. evaluations.csv is unaffected.",
-                level="warning",
-                host=stream.host,
-                port=stream.port,
-                last_error=self.stream_sink.stats.last_error,
-            )
-
         if self.logger is not None and self.server is not None:
             self._warn_if_no_island_ever_connected()
             self.logger.run_end(
@@ -589,15 +485,10 @@ class Master:
             },
             "schema_version": SCHEMA_VERSION,
             "harness_version": HARNESS_VERSION,
-            "live_stream": self._stream_stats(),
         }
         (self.output_dir / "summary.json").write_text(
             json.dumps(payload, indent=2, default=str), encoding="utf-8"
         )
-        self._send_island_artifacts()
-        self._send_stream_tail(payload)
-        if self.stream_sink is not None:
-            self.stream_sink.close()
         return summary
 
     def _warn_if_no_island_ever_connected(self) -> None:
@@ -619,22 +510,6 @@ class Master:
             advertise_host=self._advertise_host(),
             backend=self.backend.name if self.backend else None,
         )
-
-    def _stream_stats(self) -> dict[str, Any] | None:
-        """Delivery accounting for the live evaluation stream, for summary.json."""
-        if self.stream_sink is None:
-            return None
-        stats = self.stream_sink.stats
-        stream = self.config.logging.live_stream
-        return {
-            "host": stream.host,
-            "port": stream.port,
-            "records_sent": stats.written,
-            "records_dropped": stats.dropped,
-            "errors": stats.errors,
-            "degraded": stats.degraded,
-            "last_error": stats.last_error,
-        }
 
     def _maximising(self) -> bool:
         """Objective orientation, needed to pick the global best across islands."""

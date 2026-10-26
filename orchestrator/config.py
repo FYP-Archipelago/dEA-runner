@@ -15,7 +15,6 @@ from archipelago_logging.version import HARNESS_VERSION, SCHEMA_VERSION
 
 __all__ = [
     "MigrationConfig",
-    "LiveStreamConfig",
     "LoggingConfig",
     "ExecutionConfig",
     "DockerConfig",
@@ -85,35 +84,6 @@ class MigrationConfig(_Base):
     )
 
 
-class LiveStreamConfig(_Base):
-    """Live TCP stream of a run's complete output from the master to an external consumer."""
-
-    enabled: bool = Field(
-        default=False,
-        description="Stream the run's complete output to host:port as it is produced -- every run.jsonl event, every evaluations.csv row, and the final summary. Opt-in: a run with no listener should not stall or fail.",
-    )
-    host: str = Field(
-        default="127.0.0.1",
-        description="Address of the receiving service. Under the docker backend the master runs in a container, so 127.0.0.1 is the container's own loopback -- use host.docker.internal or an explicit address to reach a listener on the host.",
-    )
-    port: int = Field(
-        default=9900, ge=1, le=65535, description="Port the receiving service listens on."
-    )
-    queue_size: int = Field(
-        default=100_000,
-        ge=1000,
-        description="Outbound queue depth. On overflow records are dropped and counted rather than back-pressuring the run: a slow consumer degrades the stream, never the search. The files on disk are unaffected either way.",
-    )
-    connect_timeout_seconds: float = Field(
-        default=10.0, gt=0.0, description="Timeout for the initial connection to the receiver."
-    )
-    max_reconnect_attempts: int = Field(
-        default=5,
-        ge=0,
-        description="Reconnect attempts before the stream gives up and marks itself degraded. The run continues regardless.",
-    )
-
-
 class LoggingConfig(_Base):
     """What gets logged, how much of it, and where it goes."""
 
@@ -158,10 +128,6 @@ class LoggingConfig(_Base):
         default=100_000,
         ge=1000,
         description="Per-island outbound log queue. On overflow, records are dropped and counted rather than back-pressuring the evolutionary loop.",
-    )
-    live_stream: LiveStreamConfig = Field(
-        default_factory=LiveStreamConfig,
-        description="Live TCP stream of the run's complete output to an external consumer.",
     )
 
 
@@ -339,15 +305,6 @@ class RunConfig(_Base):
                     f"unknown benchmark_params for {self.benchmark!r}: {unknown_benchmark}; "
                     f"accepted: {sorted(accepted_benchmark)}"
                 )
-
-        if self.logging.live_stream.enabled and not (
-            self.logging.stream_to_master and self.logging.log_evaluations
-        ):
-            raise ValueError(
-                "logging.live_stream.enabled requires logging.stream_to_master and "
-                "logging.log_evaluations to both be true: the stream mirrors the master's "
-                "aggregated sinks, which are not built otherwise."
-            )
 
         if self.strict_island_range and not (4 <= self.num_islands <= 6):
             raise ValueError(

@@ -38,16 +38,6 @@ migration:
 logging:
   output_dir: runs
   genome_mode: compact
-  # Live TCP stream of the run's COMPLETE output to an external consumer:
-  # every run.jsonl event, every evaluations.csv row, and the final summary.
-  # Receive it with:
-  #   python scripts/stream_receiver.py --port 9900
-  # A missing listener degrades the stream only -- the run and the files on
-  # disk are unaffected, and summary.json records what was dropped.
-  live_stream:
-    enabled: false
-    host: 127.0.0.1
-    port: 9900
 
 execution:
   # The one config that does NOT use the default docker backend: no daemon, no
