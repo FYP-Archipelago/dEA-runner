@@ -8,9 +8,9 @@ pytest tests/test_datasets.py
 ```
 
 `MANIFEST.json` records the source URL, byte size and SHA-256 of every file.
-**That manifest is the point.** Search randomness is deliberately not
-reproducible in this harness; what must be identical between runs is the
-*dataset*, and a checksum is how that is verifiable after the fact rather than
+**That manifest is the point.** A search repeats only with a `seed` and without
+migration, but the *dataset* must be identical between every pair of runs that
+are compared, and a checksum is how that is verifiable after the fact rather than
 assumed. `run_start.datasets` carries the SHA-256 of whichever instance a run
 actually used.
 

@@ -33,6 +33,7 @@ from .config import RunConfig
 from .control_client import ControlClient
 from .migration import choose_replacements, select_migrants
 from .protocol import Role
+from .seeding import seed_for_island
 from .topology import build_topology
 
 __all__ = ["IslandRunner", "IslandResult", "build_island_sinks", "resolve_node_id"]
@@ -181,7 +182,7 @@ class IslandRunner:
                 connect_timeout=config.execution.connect_timeout_seconds,
             )
 
-        self.island_seed = int.from_bytes(os.urandom(8), "little")
+        self.island_seed = seed_for_island(config.seed, island_id)
         self.rng = np.random.default_rng(self.island_seed)
 
         self.problem = create_problem(config.benchmark, config.benchmark_params)

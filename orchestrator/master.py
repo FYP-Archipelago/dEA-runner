@@ -204,6 +204,7 @@ class Master:
                 max_pending_per_island=self.config.migration.max_pending_per_island,
                 fanout=self.config.migration.fanout,
                 evaluation_budget=self.config.evaluation_budget,
+                seed=self.config.seed,
             )
             actual_host, actual_port = self.server.start()
 

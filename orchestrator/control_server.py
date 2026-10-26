@@ -11,6 +11,7 @@ from typing import Any
 from archipelago_logging import EventLogger, MigrationIdMinter, Sink, wall_now
 
 from .protocol import Op, ProtocolError, Role, iter_messages, recv_message, send_message
+from .seeding import seed_for_broker
 from .topology import Topology
 
 __all__ = ["ControlServer", "IslandStatus", "PendingMigration"]
@@ -66,6 +67,7 @@ class ControlServer:
         fanout: str = "all",
         evaluation_budget: int | None = None,
         evaluation_sink: Sink | None = None,
+        seed: int | None = None,
     ) -> None:
         self.run_id = run_id
         self.topology = topology
@@ -75,7 +77,9 @@ class ControlServer:
         self.fanout = fanout
         self.evaluation_budget = evaluation_budget
         self.evaluation_sink = evaluation_sink
-        self._rng = random.Random()
+        self._rngs = {
+            island: random.Random(seed_for_broker(seed, island)) for island in topology
+        }
 
         self._lock = threading.RLock()
         self._migration_ids = MigrationIdMinter()
@@ -247,7 +251,7 @@ class ControlServer:
                 self._round_robin[source_island] = position + 1
                 return [neighbours[position]]
         with self._lock:
-            return [self._rng.choice(neighbours)]
+            return [self._rngs[source_island].choice(neighbours)]
 
     def _handle_migrate(self, source_island: int, message: dict[str, Any]) -> dict[str, Any]:
         migrants = message.get("migrants") or []

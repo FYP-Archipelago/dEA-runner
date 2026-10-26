@@ -189,7 +189,7 @@ class IslandStartEvent(BaseEvent):
         description="This island's share of the run's evaluation budget; its hard ceiling.",
     )
     island_seed: int = Field(
-        description="The random seed this island actually drew, from OS entropy. Recorded as an observation, not an input: runs are deliberately not reproducible, and there is no configuration field that sets this.",
+        description="The seed this island's generator was created from: derived from the run's `seed` when one is set, otherwise drawn from OS entropy. `numpy.random.default_rng(island_seed)` recreates the island's random stream either way.",
     )
     hostname: str
     pid: int

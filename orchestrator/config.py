@@ -198,6 +198,12 @@ class RunConfig(_Base):
 
     run_id: str | None = Field(default=None, description="Auto-generated when absent.")
     description: str = Field(default="", description="Free-text note carried into run_start.")
+    seed: int | None = Field(
+        default=None,
+        ge=0,
+        le=4_294_967_295,
+        description="Makes the run repeatable: every random stream in it is derived from this one value, and nothing draws OS entropy. With migration off, two runs with the same seed produce identical evaluation records. With migration on they share every island's random stream but not its trajectory, because a migrant joins its destination on whatever generation that island has reached. Null draws fresh entropy.",
+    )
     algorithm: str = Field(default="de", description="Registry name: ga, de, pso, gp or es.")
     algorithm_params: dict[str, Any] = Field(default_factory=dict)
     benchmark: str = Field(default="rastrigin", description="Registry name; see benchmarks.registry.")
