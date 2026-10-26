@@ -170,16 +170,14 @@ class Master:
             flush_interval_seconds=self.config.logging.flush_interval_seconds,
         )
 
-        evaluations_path: Path | None = None
-        if self.config.logging.log_evaluations:
-            evaluations_path = self.output_dir / "evaluations.csv"
-            self.evaluation_sink = CsvFileSink(
-                evaluations_path,
-                header=EVALUATION_CSV_HEADER,
-                flush_interval_seconds=self.config.logging.flush_interval_seconds,
-            )
-            schema_text = json.dumps(evaluation_csv_schema(), indent=2) + "\n"
-            (self.output_dir / "evaluations.schema.json").write_text(schema_text, encoding="utf-8")
+        evaluations_path = self.output_dir / "evaluations.csv"
+        self.evaluation_sink = CsvFileSink(
+            evaluations_path,
+            header=EVALUATION_CSV_HEADER,
+            flush_interval_seconds=self.config.logging.flush_interval_seconds,
+        )
+        schema_text = json.dumps(evaluation_csv_schema(), indent=2) + "\n"
+        (self.output_dir / "evaluations.schema.json").write_text(schema_text, encoding="utf-8")
 
         self.logger = EventLogger(
             self.run_id,

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from archipelago_logging.genome import DEFAULT_PRECISION_DECIMALS, GenomeLogMode
 from archipelago_logging.version import HARNESS_VERSION, SCHEMA_VERSION
@@ -90,22 +90,13 @@ class LoggingConfig(_Base):
     output_dir: str = Field(default="runs", description="Parent directory; each run gets a subdirectory.")
     genome_mode: GenomeLogMode = Field(
         default=GenomeLogMode.COMPACT,
-        description="hashed | compact | full. See archipelago_logging.genome. The genome hash is always written regardless of this setting.",
+        description="compact | full. See archipelago_logging.genome. The genome hash is always written regardless of this setting.",
     )
     genome_precision_decimals: int = Field(
         default=DEFAULT_PRECISION_DECIMALS,
         ge=0,
         le=15,
         description="Rounding used to form the location signature of real-valued genomes. Hashes from runs with different precision are not comparable.",
-    )
-    genome_sample_every: int = Field(
-        default=1,
-        ge=1,
-        description="Write the full genome body only every n-th evaluation; the rest carry the hash alone. Deterministic (counter-based), so a re-run reproduces exactly the same sampling decisions.",
-    )
-    log_evaluations: bool = Field(
-        default=True,
-        description="Write one CSV row.",
     )
     validate_events: bool = Field(
         default=True,
@@ -117,6 +108,17 @@ class LoggingConfig(_Base):
         ge=1000,
         description="Per-island outbound log queue. On overflow, records are dropped and counted rather than back-pressuring the evolutionary loop.",
     )
+
+    @field_validator("genome_mode")
+    @classmethod
+    def _genome_body_required(cls, mode: GenomeLogMode) -> GenomeLogMode:
+        """Reject a mode that writes no genome body."""
+        if mode is GenomeLogMode.HASHED:
+            raise ValueError(
+                "hashed writes no genome body, so the clustering module cannot place the "
+                "rows; use compact (the default) or full"
+            )
+        return mode
 
 
 class TerminationConfig(_Base):
@@ -447,19 +449,16 @@ class RunConfig(_Base):
         envelope_bytes = 150 + 23 * expected_parents
         genome = self.genome_bytes_per_row()
 
-        if self.logging.genome_mode is GenomeLogMode.HASHED:
-            genome_bytes = 0.0
-        elif self.logging.genome_mode is GenomeLogMode.COMPACT:
-            genome_bytes = float(genome["compact_bytes"])
-        else:
+        if self.logging.genome_mode is GenomeLogMode.FULL:
             genome_bytes = float(genome["full_bytes"])
+        else:
+            genome_bytes = float(genome["compact_bytes"])
 
-        effective_genome = genome_bytes / max(1, self.logging.genome_sample_every)
-        per_record = envelope_bytes + effective_genome
+        per_record = envelope_bytes + genome_bytes
 
         plan = self.budget_plan()
         total_evaluations = plan["projected_total_evaluations"]
-        evaluation_bytes = int(total_evaluations * per_record) if self.logging.log_evaluations else 0
+        evaluation_bytes = int(total_evaluations * per_record)
 
         generations = plan["projected_generations_if_no_early_stop"]
         generation_bytes = 460 * generations * self.num_islands

@@ -83,9 +83,8 @@ def _command_estimate(args: argparse.Namespace) -> int:
         print(
             f"\nWARNING: this configuration is projected to write "
             f"{estimate['estimated_megabytes_on_disk'] / 1000:.1f} GB.\n"
-            "  Reduce it with a smaller evaluation_budget, logging.genome_mode: hashed,\n"
-            "  logging.genome_sample_every: N, or logging.log_evaluations: false\n"
-            "  (which keeps generation_end and the migration events but drops trajectories).",
+            "  Reduce it with a smaller evaluation_budget, or logging.genome_mode: compact\n"
+            "  if it is set to full.",
             file=sys.stderr,
         )
     return 0

@@ -82,7 +82,6 @@ class IslandContext:
         genome_policy: GenomePolicy,
         genome_encoding: GenomeEncoding,
         id_minter: IndividualIdMinter | None = None,
-        log_evaluations: bool = True,
         max_evaluations: int | None = None,
     ) -> None:
         self.island_id = island_id
@@ -92,7 +91,6 @@ class IslandContext:
         self.genome_policy = genome_policy
         self.genome_encoding = genome_encoding
         self.id_minter = id_minter or IndividualIdMinter(island_id)
-        self.log_evaluations = log_evaluations
         self.max_evaluations = max_evaluations
 
         self.generation = 0
@@ -124,30 +122,29 @@ class IslandContext:
             self.best_fitness = individual.fitness
             self.best_individual = individual.copy()
 
-        if self.log_evaluations:
-            encoded: EncodedGenome = self.genome_policy.encode(
-                self.genome_encoding,
-                self.genome_for_log(individual),
-                is_best=improved,
-            )
-            self.logger.evaluation(
-                individual_id=individual.individual_id,
-                parent_ids=individual.parent_ids,
-                operator=individual.operator,
-                fitness=individual.fitness,
-                objective=(
-                    None
-                    if individual.objective is None or individual.objective == individual.fitness
-                    else individual.objective
-                ),
-                generation=self.generation,
-                genome=encoded,
-                feasible=individual.feasible,
-                constraint_violation=individual.constraint_violation,
-                origin_island=individual.origin_island,
-                origin_individual_id=individual.origin_individual_id,
-                is_island_best=True if improved else None,
-            )
+        encoded: EncodedGenome = self.genome_policy.encode(
+            self.genome_encoding,
+            self.genome_for_log(individual),
+            is_best=improved,
+        )
+        self.logger.evaluation(
+            individual_id=individual.individual_id,
+            parent_ids=individual.parent_ids,
+            operator=individual.operator,
+            fitness=individual.fitness,
+            objective=(
+                None
+                if individual.objective is None or individual.objective == individual.fitness
+                else individual.objective
+            ),
+            generation=self.generation,
+            genome=encoded,
+            feasible=individual.feasible,
+            constraint_violation=individual.constraint_violation,
+            origin_island=individual.origin_island,
+            origin_individual_id=individual.origin_individual_id,
+            is_island_best=True if improved else None,
+        )
 
         return individual
 

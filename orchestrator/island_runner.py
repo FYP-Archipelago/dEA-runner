@@ -20,7 +20,6 @@ from archipelago_logging import (
     GenomePolicy,
     IndividualIdMinter,
     JsonlFileSink,
-    NullSink,
     MultiSink,
     NetworkSink,
     Sink,
@@ -89,23 +88,19 @@ def build_island_sinks(
             flush_interval_seconds=config.logging.flush_interval_seconds,
         )
     ]
-    evaluation_components: list[Sink] = []
-    if config.logging.log_evaluations:
-        evaluation_components.append(
-            CsvFileSink(
-                output_dir / "islands" / f"island-{island_id:02d}.evaluations.csv",
-                header=EVALUATION_CSV_HEADER,
-                flush_interval_seconds=config.logging.flush_interval_seconds,
-            )
+    evaluation_components: list[Sink] = [
+        CsvFileSink(
+            output_dir / "islands" / f"island-{island_id:02d}.evaluations.csv",
+            header=EVALUATION_CSV_HEADER,
+            flush_interval_seconds=config.logging.flush_interval_seconds,
         )
+    ]
 
     if control_address is not None:
         for role, targets in (
             (Role.LOG, event_components),
-            (Role.EVALUATIONS, evaluation_components if config.logging.log_evaluations else None),
+            (Role.EVALUATIONS, evaluation_components),
         ):
-            if targets is None:
-                continue
             handshake = (
                 json.dumps({"role": role, "run_id": run_id, "island_id": island_id}) + "\n"
             )
@@ -118,10 +113,7 @@ def build_island_sinks(
                 )
             )
 
-    evaluation_sink: Sink = (
-        MultiSink(evaluation_components) if evaluation_components else NullSink()
-    )
-    return MultiSink(event_components), evaluation_sink
+    return MultiSink(event_components), MultiSink(evaluation_components)
 
 
 class IslandRunner:
@@ -189,7 +181,6 @@ class IslandRunner:
         self.genome_policy = GenomePolicy(
             mode=config.logging.genome_mode,
             precision_decimals=config.logging.genome_precision_decimals,
-            sample_every=config.logging.genome_sample_every,
         )
         self.population_size = config.resolved_population_size()
         self.budget = config.budget_per_island()
@@ -203,7 +194,6 @@ class IslandRunner:
             genome_policy=self.genome_policy,
             genome_encoding=None,
             id_minter=IndividualIdMinter(island_id),
-            log_evaluations=config.logging.log_evaluations,
             max_evaluations=self.budget,
         )
 

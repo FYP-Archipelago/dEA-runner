@@ -229,14 +229,11 @@ def _to_jsonable(encoding: GenomeEncoding, genome: Any) -> Any:
 
 @dataclass
 class GenomePolicy:
-    """Decides."""
+    """How much of each evaluated genome an ``evaluation`` record carries."""
 
     mode: GenomeLogMode = GenomeLogMode.COMPACT
     precision_decimals: int | None = DEFAULT_PRECISION_DECIMALS
-    sample_every: int = 1
     always_full_for_best: bool = True
-
-    _counter: int = 0
 
     def encode(
         self,
@@ -246,11 +243,7 @@ class GenomePolicy:
         is_best: bool = False,
     ) -> EncodedGenome:
         """Produce the genome fields for one ``evaluation`` record."""
-        self._counter += 1
-
         effective = self.mode
-        if self.sample_every > 1 and (self._counter % self.sample_every) != 0:
-            effective = GenomeLogMode.HASHED
         if is_best and self.always_full_for_best:
             effective = GenomeLogMode.FULL
 
