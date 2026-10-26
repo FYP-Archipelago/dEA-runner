@@ -8,7 +8,7 @@ import json
 from enum import Enum
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 from .version import SCHEMA_VERSION
 
@@ -113,11 +113,11 @@ class BaseEvent(BaseModel):
     )
     island_id: int | None = Field(
         default=None,
-        description="Island this record concerns. Null for whole-run master records.",
+        description="Island this record concerns. Null for whole-run master records; required on every record an island writes.",
     )
     generation: int | None = Field(
         default=None,
-        description="Logical generation on island_id at emit time. Null where not applicable. Islands are asynchronous: equal generation numbers on two islands do NOT imply the same wall-clock moment.",
+        description="Logical generation on island_id at emit time. Null for whole-run master records; required on every record an island writes.",
     )
     node_id: str | None = Field(
         default=None,
@@ -127,6 +127,15 @@ class BaseEvent(BaseModel):
     def to_json_line(self) -> str:
         """Serialise to a single JSON Lines record (no trailing newline)."""
         return self.model_dump_json(exclude_none=True)
+
+
+class IslandEvent(BaseEvent):
+    """A record written by an island, which always says which island and at what generation."""
+
+    island_id: int = Field(description="Island that wrote this record.")
+    generation: int = Field(
+        description="The island's logical generation when the record was written. Islands are asynchronous: equal generation numbers on two islands do NOT imply the same wall-clock moment.",
+    )
 
 
 class RunStartEvent(BaseEvent):
@@ -153,7 +162,6 @@ class RunStartEvent(BaseEvent):
     max_generations: int = Field(description="Safety cap on generations.")
     backend: str = Field(description="Execution backend that launched the islands: 'docker'.")
     datasets: dict[str, Any] = Field(
-        default_factory=dict,
         description="Provenance of the benchmark instance actually used: name, source (file path or generator), and the SHA-256 of the instance file where there is one.",
     )
     migration: dict[str, Any] = Field(
@@ -166,7 +174,7 @@ class RunStartEvent(BaseEvent):
     )
 
 
-class IslandStartEvent(BaseEvent):
+class IslandStartEvent(IslandEvent):
     """One island has come up and is about to initialise its population."""
 
     type: Literal["island_start"] = "island_start"
@@ -175,7 +183,9 @@ class IslandStartEvent(BaseEvent):
         description="Resolved operator parameters actually in force on this island. Logged per-island because heterogeneous-island configurations are a planned experiment, and a run-level copy would then be wrong.",
     )
     benchmark: str
-    benchmark_params: dict[str, Any] = Field(default_factory=dict)
+    benchmark_params: dict[str, Any] = Field(
+        description="The benchmark's own description of the instance this island searches."
+    )
     genome_encoding: str = Field(description="GenomeEncoding family this island's individuals use.")
     population_size: int
     evaluation_budget: int | None = Field(
@@ -203,7 +213,7 @@ class IslandStartEvent(BaseEvent):
     )
 
 
-class IslandEndEvent(BaseEvent):
+class IslandEndEvent(IslandEvent):
     """One island finished (or gave up). Absent for an island that crashed."""
 
     type: Literal["island_end"] = "island_end"
@@ -257,7 +267,7 @@ class RunEndEvent(BaseEvent):
     )
 
 
-class EvaluationEvent(BaseEvent):
+class EvaluationEvent(IslandEvent):
     """One individual was evaluated. The atomic unit of the whole format."""
 
     type: Literal["evaluation"] = "evaluation"
@@ -290,10 +300,18 @@ class EvaluationEvent(BaseEvent):
     )
     genome_encoding: str
     genome_hash: str = Field(description="128-bit blake2b of the location signature. Always present.")
-    genome_repr: Any | None = Field(
-        default=None, description="Genome body; interpretation depends on genome_repr_mode."
+    genome_repr: Any = Field(
+        description="Genome body, present on every row; interpretation depends on genome_repr_mode."
     )
     genome_repr_mode: str = Field(description="'compact' | 'full'. See archipelago_logging.genome.")
+
+    @field_validator("genome_repr")
+    @classmethod
+    def _genome_body_present(cls, value: Any) -> Any:
+        """Reject a row without a genome body: the clustering module positions rows by it."""
+        if value is None or value == "" or (isinstance(value, (list, dict)) and not value):
+            raise ValueError("every evaluation row must carry a genome body")
+        return value
     genome_precision_decimals: int | None = Field(
         default=None,
         description="Rounding used to form the signature for real encodings. Hashes from runs with different precision are NOT comparable.",
@@ -311,7 +329,7 @@ class EvaluationEvent(BaseEvent):
     )
 
 
-class GenerationEndEvent(BaseEvent):
+class GenerationEndEvent(IslandEvent):
     """Per-generation summary so downstream need not replay every evaluation."""
 
     type: Literal["generation_end"] = "generation_end"
@@ -354,7 +372,7 @@ class GenerationEndEvent(BaseEvent):
     migrants_sent_this_generation: int = 0
 
 
-class MigrationSendEvent(BaseEvent):
+class MigrationSendEvent(IslandEvent):
     """Migrants left the source island. Emitted by the source island."""
 
     type: Literal["migration_send"] = "migration_send"
@@ -375,7 +393,7 @@ class MigrationSendEvent(BaseEvent):
     )
 
 
-class MigrationArriveEvent(BaseEvent):
+class MigrationArriveEvent(IslandEvent):
     """Migrants were integrated into the destination island's population."""
 
     type: Literal["migration_arrive"] = "migration_arrive"
