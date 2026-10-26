@@ -112,7 +112,6 @@ class Knapsack(BinaryProblem):
 
     def evaluate(self, genome: Sequence[int]) -> ProblemEvaluation:
         """Score one selection, penalising any capacity overflow."""
-        self._evaluations += 1
         bits = np.asarray(genome, dtype=np.int8)
         total_value = float(bits @ self.instance.values)
         total_weight = float(bits @ self.instance.weights)

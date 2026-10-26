@@ -47,7 +47,6 @@ docker:
   dockerfile: docker/Dockerfile.worker
   cpus: 1.0
   memory: 2g
-  auto_remove: true    # set false to keep a container around for `docker logs`
   # Docker's builder VM may not inherit the host resolver, which shows up as pip
   # being unable to reach PyPI. "host" fixes it and is harmless otherwise.
   build_network: host

@@ -1,8 +1,6 @@
 # GA over bitstrings on a real strongly correlated 0/1 knapsack instance from
 # the Knapsack Problem Library -- Pisinger's hard family, where value density
 # carries almost no information.
-#
-#   python scripts/fetch_datasets.py --only knapsack
 
 description: "Binary GA, 5 islands, strongly correlated 0/1 knapsack (n=100, real instance)."
 

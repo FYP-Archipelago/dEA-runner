@@ -14,7 +14,6 @@ __all__ = [
     "MigrationIdMinter",
     "ParsedIndividualId",
     "parse_individual_id",
-    "island_uid",
 ]
 
 _INDIVIDUAL_RE = re.compile(r"^i(?P<island>\d{2,})-g(?P<generation>\d{6,})-n(?P<ordinal>\d{9,})$")
@@ -24,11 +23,6 @@ def new_run_id() -> str:
     """Mint a run id: UTC timestamp for sortability plus 8 hex chars for uniqueness."""
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     return f"run-{stamp}-{os.urandom(4).hex()}"
-
-
-def island_uid(run_id: str, island_id: int) -> str:
-    """Stable identifier for one island within one run (used as a log shard name)."""
-    return f"{run_id}.island-{island_id:02d}"
 
 
 class IndividualIdMinter:

@@ -1,8 +1,6 @@
 # Permutation GA on a real TSPLIB instance, with order crossover and inversion
 # mutation (inversion is a 2-opt move on a symmetric tour).
 #
-#   python scripts/fetch_datasets.py --only tsp
-#
 # berlin52's optimal tour length is 7542, so a run's result is directly
 # checkable against the literature. Swap in eil51 (optimum 426), att48 (10628)
 # or kroA100 (21282).

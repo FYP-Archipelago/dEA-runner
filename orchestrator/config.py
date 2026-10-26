@@ -88,9 +88,6 @@ class LoggingConfig(_Base):
     """What gets logged, how much of it, and where it goes."""
 
     output_dir: str = Field(default="runs", description="Parent directory; each run gets a subdirectory.")
-    run_subdir: str | None = Field(
-        default=None, description="Explicit subdirectory name. Defaults to the run id."
-    )
     genome_mode: GenomeLogMode = Field(
         default=GenomeLogMode.COMPACT,
         description="hashed | compact | full. See archipelago_logging.genome. The genome hash is always written regardless of this setting.",
@@ -113,15 +110,6 @@ class LoggingConfig(_Base):
     validate_events: bool = Field(
         default=True,
         description="Validate every event against its Pydantic model before writing. Costs a few microseconds per record; disable only for long sweeps whose configuration has already passed a validated smoke run.",
-    )
-    compress: bool = Field(default=False, description="gzip the JSON Lines shards.")
-    write_island_shards: bool = Field(
-        default=True,
-        description="Each island writes its own durable shard file. Strongly recommended: it is the copy that survives a master crash or a saturated network sink.",
-    )
-    stream_to_master: bool = Field(
-        default=True,
-        description="Islands also stream events to the master's collector, which writes the single aggregated run.jsonl. This is the path the later real-time streaming phase builds on.",
     )
     flush_interval_seconds: float = Field(default=2.0, ge=0.0)
     network_queue_size: int = Field(
@@ -203,23 +191,6 @@ class DockerConfig(_Base):
     )
     cpus: float = Field(default=1.0, gt=0.0, description="CPU quota.")
     memory: str = Field(default="2g", description="Memory limit per worker container, e.g. '2g'.")
-    network: str | None = Field(
-        default=None,
-        description="Attach the islands to this existing Docker network. Leave unset (the default) to create a private bridge network per run and remove it afterwards. The per-run network is what lets a containerised master and its islands reach each other without routing through the host, so it is also unaffected by a host firewall that rejects traffic from the docker bridge.",
-    )
-    auto_remove: bool = Field(
-        default=True,
-        description="Remove containers on exit. Set false to keep a crashed worker's container around for `docker logs`.",
-    )
-    environment: dict[str, str] = Field(default_factory=dict)
-    labels: dict[str, str] = Field(
-        default_factory=lambda: {"app": "archipelago", "component": "island-worker"},
-        description="Applied to every worker container so an orphaned run can be found and cleaned up with a label filter.",
-    )
-    mount_output_dir: bool = Field(
-        default=True,
-        description="Bind-mount the run's output directory into each container so island shards land on the host filesystem directly.",
-    )
 
 
 class RunConfig(_Base):
@@ -249,13 +220,9 @@ class RunConfig(_Base):
     )
     num_islands: int = Field(
         default=5,
-        ge=1,
-        le=64,
-        description="Islands, one worker each. The project scope fixes this at 4-6; see strict_island_range.",
-    )
-    strict_island_range: bool = Field(
-        default=True,
-        description="Enforce the project's 4-6 island range. Set false for smoke tests and unit tests, which legitimately want 1-2 islands.",
+        ge=4,
+        le=6,
+        description="Islands, one container each. The project scope fixes this at 4-6.",
     )
 
     termination: "TerminationConfig" = Field(default_factory=lambda: TerminationConfig())
@@ -298,12 +265,6 @@ class RunConfig(_Base):
                     f"unknown benchmark_params for {self.benchmark!r}: {unknown_benchmark}; "
                     f"accepted: {sorted(accepted_benchmark)}"
                 )
-
-        if self.strict_island_range and not (4 <= self.num_islands <= 6):
-            raise ValueError(
-                f"num_islands={self.num_islands} is outside the project's supported range of 4-6. "
-                "Set strict_island_range: false to override (intended for smoke and unit tests)."
-            )
 
         if self.migration.enabled:
             if self.migration.topology.lower() not in TOPOLOGIES:
@@ -409,7 +370,7 @@ class RunConfig(_Base):
 
     def output_path(self, run_id: str) -> Path:
         """Directory this run's artefacts are written to."""
-        return Path(self.logging.output_dir) / (self.logging.run_subdir or run_id)
+        return Path(self.logging.output_dir) / run_id
 
     def genome_bytes_per_row(self) -> dict[str, Any]:
         """Estimate the bytes one genome costs in a CSV row, for this exact run."""
@@ -489,9 +450,7 @@ class RunConfig(_Base):
             migration_bytes = int(events * 420)
 
         total = evaluation_bytes + generation_bytes + migration_bytes
-        copies = (1 if self.logging.write_island_shards else 0) + (
-            1 if self.logging.stream_to_master else 0
-        )
+        copies = 2
         return {
             **plan,
             **genome,
@@ -500,9 +459,9 @@ class RunConfig(_Base):
             "evaluations_csv_bytes": evaluation_bytes,
             "run_jsonl_bytes": generation_bytes + migration_bytes,
             "estimated_bytes_single_copy": total,
-            "estimated_bytes_on_disk": total * max(1, copies),
-            "estimated_megabytes_on_disk": round(total * max(1, copies) / 1e6, 2),
-            "copies_written": max(1, copies),
+            "estimated_bytes_on_disk": total * copies,
+            "estimated_megabytes_on_disk": round(total * copies / 1e6, 2),
+            "copies_written": copies,
         }
 
     def resolved(self) -> dict[str, Any]:

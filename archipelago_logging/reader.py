@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import gzip
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,7 +30,6 @@ __all__ = [
     "validate_log",
     "MigrationEdge",
     "join_migration_edges",
-    "merge_streams",
 ]
 
 
@@ -39,16 +37,9 @@ class LogValidationError(Exception):
     """Raised by :func:`validate_log` when a log violates the schema contract."""
 
 
-def _open(path: str | Path):
-    path = Path(path)
-    if path.suffix == ".gz":
-        return gzip.open(path, "rt", encoding="utf-8")
-    return open(path, "r", encoding="utf-8")
-
-
 def iter_lines(path: str | Path) -> Iterator[str]:
-    """Yield non-empty lines from a (possibly gzipped) JSON Lines log."""
-    with _open(path) as handle:
+    """Yield non-empty lines from a JSON Lines log."""
+    with open(path, "r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
             if line:
@@ -68,17 +59,12 @@ def companion_evaluations_path(jsonl_path: str | Path) -> Path | None:
     """Locate the CSV evaluation stream that belongs with a JSON Lines file."""
     path = Path(jsonl_path)
     stem = path.name
-    for suffix in (".jsonl.gz", ".jsonl"):
-        if stem.endswith(suffix):
-            stem = stem[: -len(suffix)]
-            break
+    if stem.endswith(".jsonl"):
+        stem = stem[: -len(".jsonl")]
 
-    candidates = [
-        path.with_name(f"{stem}.evaluations.csv"),
-        path.with_name(f"{stem}.evaluations.csv.gz"),
-    ]
+    candidates = [path.with_name(f"{stem}.evaluations.csv")]
     if stem == "run":
-        candidates += [path.with_name("evaluations.csv"), path.with_name("evaluations.csv.gz")]
+        candidates.append(path.with_name("evaluations.csv"))
 
     for candidate in candidates:
         if candidate.exists():
@@ -88,7 +74,7 @@ def companion_evaluations_path(jsonl_path: str | Path) -> Path | None:
 
 def iter_evaluation_rows(path: str | Path) -> Iterator[dict[str, str]]:
     """Yield raw ``dict`` rows from an ``evaluations.csv``, unvalidated."""
-    with _open(path) as handle:
+    with open(path, "r", encoding="utf-8") as handle:
         yield from csv.DictReader(handle)
 
 
@@ -129,13 +115,6 @@ def iter_events(
         companion = companion_evaluations_path(path)
         if companion is not None:
             yield from iter_evaluations(companion, strict=strict)
-
-
-def merge_streams(paths: Iterable[str | Path]) -> Iterator[BaseEvent]:
-    """Interleave several per-island shards into one wall-clock-ordered stream."""
-    events = [event for path in paths for event in iter_events(path)]
-    events.sort(key=lambda event: (event.t_wall, event.emitter, event.seq))
-    return iter(events)
 
 
 @dataclass(frozen=True)

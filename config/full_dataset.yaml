@@ -6,7 +6,6 @@
 # resulting evaluations.csv has a known number of rows regardless of which
 # algorithm or problem is swapped in.
 #
-#   python scripts/fetch_datasets.py
 #   python -m orchestrator.cli estimate --config config/full_dataset.yaml
 #   python -m orchestrator.cli run      --config config/full_dataset.yaml
 

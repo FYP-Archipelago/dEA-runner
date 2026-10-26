@@ -184,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         "JSON Lines file and its companion evaluations.csv together, since `seq` "
         "spans both.",
     )
-    verify_parser.add_argument("path", help="Path to a run's .jsonl (or .jsonl.gz) file.")
+    verify_parser.add_argument("path", help="Path to a run's .jsonl file.")
     verify_parser.add_argument(
         "--allow-incomplete",
         action="store_true",

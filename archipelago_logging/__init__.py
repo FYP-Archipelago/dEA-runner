@@ -39,7 +39,6 @@ from .genome import (
 from .ids import (
     IndividualIdMinter,
     MigrationIdMinter,
-    island_uid,
     new_run_id,
     parse_individual_id,
 )
@@ -53,7 +52,6 @@ from .reader import (
     iter_events,
     iter_raw,
     join_migration_edges,
-    merge_streams,
     validate_log,
 )
 from .sinks import (
@@ -105,7 +103,6 @@ __all__ = [
     "decode_compact",
     "DEFAULT_PRECISION_DECIMALS",
     "new_run_id",
-    "island_uid",
     "IndividualIdMinter",
     "MigrationIdMinter",
     "parse_individual_id",
@@ -122,7 +119,6 @@ __all__ = [
     "iter_evaluation_rows",
     "companion_evaluations_path",
     "iter_raw",
-    "merge_streams",
     "validate_log",
     "LogValidationError",
     "MigrationEdge",

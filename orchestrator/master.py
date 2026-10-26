@@ -132,11 +132,6 @@ class Master:
             build_network=self.config.docker.build_network,
             cpus=self.config.docker.cpus,
             memory=self.config.docker.memory,
-            network=self.config.docker.network,
-            auto_remove=self.config.docker.auto_remove,
-            environment=self.config.docker.environment,
-            labels=self.config.docker.labels,
-            mount_output_dir=self.config.docker.mount_output_dir,
             repository_root=self.repository_root,
             logging_output_root=Path(self.config.logging.output_dir),
         )
@@ -169,27 +164,18 @@ class Master:
         (self.output_dir / "islands").chmod(0o777)
         config_path = self.config.write_resolved(self.output_dir / "resolved_config.yaml")
 
-        compress = self.config.logging.compress
-        gz = ".gz" if compress else ""
-
-        if self.config.logging.stream_to_master:
-            aggregate_path = self.output_dir / f"run.jsonl{gz}"
-        else:
-            aggregate_path = self.output_dir / f"master.jsonl{gz}"
-
+        aggregate_path = self.output_dir / "run.jsonl"
         self.aggregate_sink = JsonlFileSink(
             aggregate_path,
-            compress=compress,
             flush_interval_seconds=self.config.logging.flush_interval_seconds,
         )
 
         evaluations_path: Path | None = None
-        if self.config.logging.stream_to_master and self.config.logging.log_evaluations:
-            evaluations_path = self.output_dir / f"evaluations.csv{gz}"
+        if self.config.logging.log_evaluations:
+            evaluations_path = self.output_dir / "evaluations.csv"
             self.evaluation_sink = CsvFileSink(
                 evaluations_path,
                 header=EVALUATION_CSV_HEADER,
-                compress=compress,
                 flush_interval_seconds=self.config.logging.flush_interval_seconds,
             )
             schema_text = json.dumps(evaluation_csv_schema(), indent=2) + "\n"
@@ -211,7 +197,7 @@ class Master:
                 run_id=self.run_id,
                 topology=self.topology,
                 logger=self.logger,
-                aggregate_sink=self.aggregate_sink if self.config.logging.stream_to_master else None,
+                aggregate_sink=self.aggregate_sink,
                 evaluation_sink=self.evaluation_sink,
                 host=bind_host,
                 port=bind_port,

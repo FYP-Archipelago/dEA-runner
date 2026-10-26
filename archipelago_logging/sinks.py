@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gzip
 import io
 import os
 import queue
@@ -47,11 +46,6 @@ class Sink(ABC):
     def write(self, line: str) -> None:
         """Accept one record. Must not raise; failures are recorded in ``stats``."""
 
-    def write_many(self, lines: Iterable[str]) -> None:
-        """Write several lines; overridden where a batch is cheaper."""
-        for line in lines:
-            self.write(line)
-
     def flush(self) -> None:
         """Push any buffered data onward. May be a no-op."""
 
@@ -91,13 +85,12 @@ class CallbackSink(Sink):
 
 
 class TextLineFileSink(Sink):
-    """Append-only, buffered, line-oriented text file, optionally gzip-compressed."""
+    """Append-only, buffered, line-oriented text file."""
 
     def __init__(
         self,
         path: str | os.PathLike[str],
         *,
-        compress: bool = False,
         buffer_bytes: int = 1 << 20,
         flush_interval_seconds: float = 2.0,
         header: str | None = None,
@@ -105,7 +98,6 @@ class TextLineFileSink(Sink):
         super().__init__()
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._compress = compress
         self._buffer_bytes = buffer_bytes
         self._flush_interval = flush_interval_seconds
         self._buffer = io.StringIO()
@@ -117,10 +109,7 @@ class TextLineFileSink(Sink):
             not self.path.exists() or self.path.stat().st_size == 0
         )
 
-        if compress:
-            self._handle = gzip.open(self.path, "at", encoding="utf-8")
-        else:
-            self._handle = open(self.path, "a", encoding="utf-8")
+        self._handle = open(self.path, "a", encoding="utf-8")
 
         if needs_header:
             self._handle.write(header + "\n")
@@ -197,13 +186,11 @@ class CsvFileSink(TextLineFileSink):
         path: str | os.PathLike[str],
         *,
         header: str,
-        compress: bool = False,
         buffer_bytes: int = 1 << 20,
         flush_interval_seconds: float = 2.0,
     ) -> None:
         super().__init__(
             path,
-            compress=compress,
             buffer_bytes=buffer_bytes,
             flush_interval_seconds=flush_interval_seconds,
             header=header,

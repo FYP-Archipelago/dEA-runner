@@ -78,33 +78,27 @@ def build_island_sinks(
     island_id: int,
     output_dir: Path,
     control_address: tuple[str, int] | None,
-) -> tuple[Sink, Sink, list[Sink]]:
-    """Build this island's two sink fan-outs."""
+) -> tuple[Sink, Sink]:
+    """Build this island's two sink fan-outs: its own shard files, and the stream to the master."""
     import json
 
-    components: list[Sink] = []
-    event_components: list[Sink] = []
-    evaluation_components: list[Sink] = []
-    suffix = ".gz" if config.logging.compress else ""
-
-    if config.logging.write_island_shards:
-        shard = JsonlFileSink(
-            output_dir / "islands" / f"island-{island_id:02d}.jsonl{suffix}",
-            compress=config.logging.compress,
+    event_components: list[Sink] = [
+        JsonlFileSink(
+            output_dir / "islands" / f"island-{island_id:02d}.jsonl",
             flush_interval_seconds=config.logging.flush_interval_seconds,
         )
-        event_components.append(shard)
-        if config.logging.log_evaluations:
-            evaluation_components.append(
-                CsvFileSink(
-                    output_dir / "islands" / f"island-{island_id:02d}.evaluations.csv{suffix}",
-                    header=EVALUATION_CSV_HEADER,
-                    compress=config.logging.compress,
-                    flush_interval_seconds=config.logging.flush_interval_seconds,
-                )
+    ]
+    evaluation_components: list[Sink] = []
+    if config.logging.log_evaluations:
+        evaluation_components.append(
+            CsvFileSink(
+                output_dir / "islands" / f"island-{island_id:02d}.evaluations.csv",
+                header=EVALUATION_CSV_HEADER,
+                flush_interval_seconds=config.logging.flush_interval_seconds,
             )
+        )
 
-    if config.logging.stream_to_master and control_address is not None:
+    if control_address is not None:
         for role, targets in (
             (Role.LOG, event_components),
             (Role.EVALUATIONS, evaluation_components if config.logging.log_evaluations else None),
@@ -123,11 +117,10 @@ def build_island_sinks(
                 )
             )
 
-    components = event_components + evaluation_components
     evaluation_sink: Sink = (
         MultiSink(evaluation_components) if evaluation_components else NullSink()
     )
-    return MultiSink(event_components), evaluation_sink, components
+    return MultiSink(event_components), evaluation_sink
 
 
 class IslandRunner:
@@ -160,10 +153,9 @@ class IslandRunner:
         if sink is not None:
             self.sink = sink
             self.evaluation_sink: Sink | None = evaluation_sink
-            self._sink_components: list[Sink] = [sink]
             self._owns_sink = False
         else:
-            self.sink, self.evaluation_sink, self._sink_components = build_island_sinks(
+            self.sink, self.evaluation_sink = build_island_sinks(
                 config, run_id, island_id, self.output_dir, control_address
             )
             self._owns_sink = True

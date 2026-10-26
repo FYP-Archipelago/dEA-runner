@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import socket
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +29,6 @@ class WorkerSpec:
     output_dir: Path
     control_host: str
     control_port: int
-    environment: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -61,11 +60,6 @@ class DockerBackend:
         build_network: str | None = None,
         cpus: float = 1.0,
         memory: str = "2g",
-        network: str | None = None,
-        auto_remove: bool = True,
-        environment: dict[str, str] | None = None,
-        labels: dict[str, str] | None = None,
-        mount_output_dir: bool = True,
         repository_root: Path | None = None,
         logging_output_root: Path | None = None,
     ) -> None:
@@ -93,12 +87,11 @@ class DockerBackend:
         self.build_network = build_network
         self.cpus = cpus
         self.memory = memory
-        self.network = network
-        self.auto_remove = auto_remove
-        self.environment = dict(environment or {})
-        self.labels = dict(labels or {})
-        self.labels["archipelago.run_id"] = run_id
-        self.mount_output_dir = mount_output_dir
+        self.labels = {
+            "app": "archipelago",
+            "component": "island-worker",
+            "archipelago.run_id": run_id,
+        }
         self.repository_root = Path(repository_root or Path(__file__).resolve().parents[2])
         self.logging_output_root = (
             Path(logging_output_root).resolve() if logging_output_root is not None else None
@@ -107,7 +100,7 @@ class DockerBackend:
         self._containers: dict[int, Any] = {}
         self._node_ids: dict[int, str] = {}
         self._build_log: list[str] = []
-        self.network_name: str = network or f"archipelago-{run_id[-8:]}"
+        self.network_name: str = f"archipelago-{run_id[-8:]}"
         self.worker_network: str = self.network_name
         self._created_network: Any | None = None
         self.master_alias: str | None = None
@@ -190,20 +183,15 @@ class DockerBackend:
         """Decide where the islands live, so that they can reach the master."""
         master = self._own_container()
 
-        if self.network is not None:
-            self.worker_network = self.network
-        elif master is not None:
+        if master is not None:
             self._created_network = self.client.networks.create(
                 self.network_name, driver="bridge", labels=self.labels
             )
             self.worker_network = self.network_name
+            self._attach_master(master)
         else:
             self.worker_network = "host"
             self.network_name = "host"
-            return
-
-        if master is not None:
-            self._attach_master(master)
 
     def _attach_master(self, container: Any) -> None:
         """Join the islands' network, so they can reach us by name."""
@@ -315,17 +303,10 @@ class DockerBackend:
             "PYTHONUNBUFFERED": "1",
             "IN_ARCHIPELAGO_CONTAINER": "1",
             "ISLAND_CONTAINER_NAME": container_name,
-            **self.environment,
-            **spec.environment,
         }
 
-        volumes: dict[str, dict[str, str]] = {}
-        if self.mount_output_dir:
-            output_dir.mkdir(parents=True, exist_ok=True)
-            volumes[self._host_mount_source(output_dir)] = {
-                "bind": str(output_dir),
-                "mode": "rw",
-            }
+        output_dir.mkdir(parents=True, exist_ok=True)
+        volumes = {self._host_mount_source(output_dir): {"bind": str(output_dir), "mode": "rw"}}
 
         container = self.client.containers.run(
             self.image,
@@ -377,13 +358,12 @@ class DockerBackend:
 
     def cleanup(self) -> None:
         """Remove the run's containers and the network created for it."""
-        if self.auto_remove:
-            for container in self._containers.values():
-                try:
-                    container.remove(force=True)
-                except Exception:
-                    pass
-            self._containers.clear()
+        for container in self._containers.values():
+            try:
+                container.remove(force=True)
+            except Exception:
+                pass
+        self._containers.clear()
 
         if self._master_container is not None and self._created_network is not None:
             try:

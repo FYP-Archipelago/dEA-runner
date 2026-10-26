@@ -28,7 +28,6 @@ from .registry import (
     benchmark_domain,
     create_problem,
     register,
-    register_problem,
 )
 from .symbolic import SYMBOLIC_BENCHMARKS, SymbolicRegression, load_regression_csv
 from .tsp import TSP, TSPInstance, load_tsplib_file
@@ -64,6 +63,5 @@ __all__ = [
     "available_benchmarks",
     "benchmark_domain",
     "register",
-    "register_problem",
     "BenchmarkNotFound",
 ]

@@ -96,13 +96,6 @@ class ControlServer:
 
         self.total_migration_events = 0
         self.total_migrants = 0
-        self.collected_log_lines = 0
-
-    @property
-    def evaluations_spent(self) -> int:
-        """Evaluations across the archipelago, as last reported by heartbeats."""
-        with self._lock:
-            return sum(status.evaluations for status in self.islands.values())
 
 
     @property
@@ -175,8 +168,6 @@ class ControlServer:
                     continue
                 if sink is not None:
                     sink.write(line)
-                with self._lock:
-                    self.collected_log_lines += 1
         except OSError:
             return
 

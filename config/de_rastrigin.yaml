@@ -3,8 +3,6 @@
 # score well by drifting toward zero. The shift is the official CEC2017 vector,
 # read from a data file: there is no generated substitute, so the problem is
 # identical in every run of this config.
-#
-#   python scripts/fetch_datasets.py --only cec
 
 description: "DE/rand/1/bin, 5 islands, CEC-shifted Rastrigin 10D, ring migration."
 
