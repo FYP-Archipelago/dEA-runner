@@ -24,7 +24,7 @@ from archipelago_logging import (
 )
 from archipelago_logging.version import HARNESS_VERSION, SCHEMA_VERSION
 
-from .backends import DockerBackend, ExecutionBackend, WorkerSpec
+from .backends import DockerBackend, WorkerSpec
 from .config import RunConfig
 from .control_server import ControlServer
 from .topology import build_topology, describe_topology
@@ -118,11 +118,11 @@ class Master:
         self.evaluation_sink: Sink | None = None
         self.logger: EventLogger | None = None
         self.server: ControlServer | None = None
-        self.backend: ExecutionBackend | None = None
+        self.backend: DockerBackend | None = None
         self._node_ids: dict[int, str] = {}
 
 
-    def _make_backend(self) -> ExecutionBackend:
+    def _make_backend(self) -> DockerBackend:
         return DockerBackend(
             image=self.config.docker.image,
             run_id=self.run_id,

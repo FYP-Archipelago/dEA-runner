@@ -1,12 +1,10 @@
-"""Execution backends: how island workers are launched."""
+"""How island containers are launched."""
 
-from .base import ExecutionBackend, WorkerSpec, WorkerStatus
-from .docker_backend import DockerBackend, DockerUnavailable
+from .docker_backend import DockerBackend, DockerUnavailable, WorkerSpec, WorkerStatus
 
 __all__ = [
-    "ExecutionBackend",
-    "WorkerSpec",
-    "WorkerStatus",
     "DockerBackend",
     "DockerUnavailable",
+    "WorkerSpec",
+    "WorkerStatus",
 ]

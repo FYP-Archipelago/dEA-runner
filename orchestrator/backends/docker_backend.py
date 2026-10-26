@@ -4,21 +4,48 @@ from __future__ import annotations
 
 import os
 import socket
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .base import ExecutionBackend, WorkerSpec, WorkerStatus
-
-__all__ = ["DockerBackend", "DockerUnavailable", "HOST_RUNS_DIR_ENV"]
+__all__ = [
+    "DockerBackend",
+    "DockerUnavailable",
+    "WorkerSpec",
+    "WorkerStatus",
+    "HOST_RUNS_DIR_ENV",
+]
 
 HOST_RUNS_DIR_ENV = "HOST_RUNS_DIR"
+
+
+@dataclass
+class WorkerSpec:
+    """Everything one island worker needs to start."""
+
+    island_id: int
+    run_id: str
+    config_path: Path
+    output_dir: Path
+    control_host: str
+    control_port: int
+    environment: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class WorkerStatus:
+    """Whether one island's container is still running."""
+
+    island_id: int
+    node_id: str
+    running: bool
 
 
 class DockerUnavailable(RuntimeError):
     """Raised when the Docker SDK or daemon is not usable."""
 
 
-class DockerBackend(ExecutionBackend):
+class DockerBackend:
     """Runs each island in its own container."""
 
     name = "docker"
