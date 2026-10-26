@@ -255,7 +255,6 @@ class Master:
                         "resolved_config_path": str(config_path),
                         "budget_plan": self.config.budget_plan(),
                         "backend": self.backend.describe(),
-                        "log_volume_estimate": self.config.estimate_log_volume(),
                     },
                 },
                 host=_host_facts(),

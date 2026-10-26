@@ -9,9 +9,6 @@ from .config import load_config
 
 __all__ = ["main"]
 
-VOLUME_WARNING_MEGABYTES = 2000.0
-
-
 def _add_config_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", "-c", default=None, help="Path to a run config YAML.")
     parser.add_argument(
@@ -75,36 +72,10 @@ def _command_validate(args: argparse.Namespace) -> int:
     return 0
 
 
-def _command_estimate(args: argparse.Namespace) -> int:
-    config = load_config(args.config, overrides=args.overrides)
-    estimate = config.estimate_log_volume()
-    print(json.dumps(estimate, indent=2))
-    if estimate["estimated_megabytes_on_disk"] > VOLUME_WARNING_MEGABYTES:
-        print(
-            f"\nWARNING: this configuration is projected to write "
-            f"{estimate['estimated_megabytes_on_disk'] / 1000:.1f} GB.\n"
-            "  Reduce it with a smaller evaluation_budget, or logging.genome_mode: compact\n"
-            "  if it is set to full.",
-            file=sys.stderr,
-        )
-    return 0
-
-
 def _command_run(args: argparse.Namespace) -> int:
     from .master import Master
 
     config = load_config(args.config, overrides=args.overrides)
-    estimate = config.estimate_log_volume()
-
-    if estimate["estimated_megabytes_on_disk"] > VOLUME_WARNING_MEGABYTES and not args.yes:
-        print(
-            f"This configuration is projected to write about "
-            f"{estimate['estimated_megabytes_on_disk'] / 1000:.1f} GB "
-            f"({estimate['projected_total_evaluations']:,} evaluation rows).\n"
-            "Re-run with --yes to proceed, or see `estimate` for how to reduce it.",
-            file=sys.stderr,
-        )
-        return 2
 
     print(f"Starting run: {config.algorithm} on {config.benchmark}")
     _print_plan(config)
@@ -152,12 +123,6 @@ def main(argv: list[str] | None = None) -> int:
 
     run_parser = subparsers.add_parser("run", help="Execute a run.")
     _add_config_arguments(run_parser)
-    run_parser.add_argument(
-        "--yes",
-        "-y",
-        action="store_true",
-        help="Proceed without confirming a large projected log volume.",
-    )
     run_parser.set_defaults(handler=_command_run)
 
     validate_parser = subparsers.add_parser(
@@ -165,12 +130,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_config_arguments(validate_parser)
     validate_parser.set_defaults(handler=_command_validate)
-
-    estimate_parser = subparsers.add_parser(
-        "estimate", help="Project the log volume a config would produce."
-    )
-    _add_config_arguments(estimate_parser)
-    estimate_parser.set_defaults(handler=_command_estimate)
 
     list_parser = subparsers.add_parser(
         "list", help="List registered algorithms, benchmarks and migration policies."

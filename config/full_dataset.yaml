@@ -6,8 +6,7 @@
 # resulting evaluations.csv has a known number of rows regardless of which
 # algorithm or problem is swapped in.
 #
-#   python -m orchestrator.cli estimate --config config/full_dataset.yaml
-#   python -m orchestrator.cli run      --config config/full_dataset.yaml
+#   python -m orchestrator.cli run --config config/full_dataset.yaml
 
 description: "Reference dataset run: 100,000 evaluations, 5 islands, TSPLIB kroA100."
 
