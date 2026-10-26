@@ -37,10 +37,9 @@ logging:
   genome_mode: compact
 
 execution:
-  backend: docker      # the default; each island gets its own container
-  # The master binds 0.0.0.0 automatically under this backend, and workers reach
-  # it at host.docker.internal (mapped to host-gateway on every container).
-  connect_timeout_seconds: 120.0   # containers start slower than subprocesses
+  # The master binds 0.0.0.0 automatically, and workers reach it at
+  # host.docker.internal (mapped to host-gateway on every container).
+  connect_timeout_seconds: 120.0   # headroom for slow container starts
 
 docker:
   image: archipelago-worker:latest

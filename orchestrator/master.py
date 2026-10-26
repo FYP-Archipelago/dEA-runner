@@ -24,7 +24,7 @@ from archipelago_logging import (
 )
 from archipelago_logging.version import HARNESS_VERSION, SCHEMA_VERSION
 
-from .backends import DockerBackend, ExecutionBackend, LocalBackend, WorkerSpec
+from .backends import DockerBackend, ExecutionBackend, WorkerSpec
 from .config import RunConfig
 from .control_server import ControlServer
 from .topology import build_topology, describe_topology
@@ -123,33 +123,28 @@ class Master:
 
 
     def _make_backend(self) -> ExecutionBackend:
-        if self.config.execution.backend == "docker":
-            return DockerBackend(
-                image=self.config.docker.image,
-                run_id=self.run_id,
-                dockerfile=self.config.docker.dockerfile,
-                build_context=self.config.docker.build_context,
-                build=self.config.docker.build,
-                build_network=self.config.docker.build_network,
-                cpus=self.config.docker.cpus,
-                memory=self.config.docker.memory,
-                network=self.config.docker.network,
-                auto_remove=self.config.docker.auto_remove,
-                environment=self.config.docker.environment,
-                labels=self.config.docker.labels,
-                mount_output_dir=self.config.docker.mount_output_dir,
-                repository_root=self.repository_root,
-                logging_output_root=Path(self.config.logging.output_dir),
-            )
-        return LocalBackend(
-            python_executable=self.config.execution.worker_python,
+        return DockerBackend(
+            image=self.config.docker.image,
+            run_id=self.run_id,
+            dockerfile=self.config.docker.dockerfile,
+            build_context=self.config.docker.build_context,
+            build=self.config.docker.build,
+            build_network=self.config.docker.build_network,
+            cpus=self.config.docker.cpus,
+            memory=self.config.docker.memory,
+            network=self.config.docker.network,
+            auto_remove=self.config.docker.auto_remove,
+            environment=self.config.docker.environment,
+            labels=self.config.docker.labels,
+            mount_output_dir=self.config.docker.mount_output_dir,
             repository_root=self.repository_root,
+            logging_output_root=Path(self.config.logging.output_dir),
         )
 
     def _bind_address(self) -> tuple[str, int]:
         """Where the master listens."""
         host = self.config.execution.control_host
-        if self.config.execution.backend == "docker" and host in ("127.0.0.1", "localhost"):
+        if host in ("127.0.0.1", "localhost"):
             host = "0.0.0.0"
         return host, self.config.execution.control_port
 
@@ -157,14 +152,12 @@ class Master:
         """The address workers use to reach the master."""
         if self.config.execution.advertise_host:
             return self.config.execution.advertise_host
-        if self.config.execution.backend == "docker":
-            alias = getattr(self.backend, "master_alias", None)
-            if alias:
-                return alias
-            if getattr(self.backend, "worker_network", None) == "host":
-                return self.config.execution.control_host
-            return "host.docker.internal"
-        return self.config.execution.control_host
+        alias = getattr(self.backend, "master_alias", None)
+        if alias:
+            return alias
+        if getattr(self.backend, "worker_network", None) == "host":
+            return self.config.execution.control_host
+        return "host.docker.internal"
 
 
     def run(self) -> RunSummary:
@@ -172,9 +165,8 @@ class Master:
         started = time.monotonic()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         (self.output_dir / "islands").mkdir(parents=True, exist_ok=True)
-        if self.config.execution.backend == "docker":
-            self.output_dir.chmod(0o777)
-            (self.output_dir / "islands").chmod(0o777)
+        self.output_dir.chmod(0o777)
+        (self.output_dir / "islands").chmod(0o777)
         config_path = self.config.write_resolved(self.output_dir / "resolved_config.yaml")
 
         compress = self.config.logging.compress

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Regenerate the field reference and worked examples in ``docs/LOGGING_FORMAT.md``."""
+"""Regenerate the field reference and worked examples in ``docs/LOGGING_FORMAT.md``.
+
+The examples come from a real run, so regenerating them needs Docker and a worker
+image built from the current source; ``--fields-only`` and ``--check`` need neither.
+"""
 
 from __future__ import annotations
 
@@ -147,7 +151,7 @@ def build_field_reference() -> str:
     return "\n".join(parts)
 
 
-def _example_records() -> dict[str, dict[str, Any]]:
+def _example_records(image: str) -> dict[str, dict[str, Any]]:
     """Capture one real record of each type by running a tiny archipelago."""
     import shutil
     import tempfile
@@ -175,7 +179,7 @@ def _example_records() -> dict[str, dict[str, Any]]:
                 "replacement": "worst",
             },
             logging={"output_dir": str(workspace)},
-            execution={"backend": "local"},
+            docker={"image": image, "build": False},
         )
         summary = Master(config, repository_root=REPOSITORY_ROOT).run()
 
@@ -249,13 +253,13 @@ def _replace_region(text: str, begin: str, end: str, replacement: str) -> str:
     return pattern.sub(f"{begin}\n{replacement}\n{end}", text)
 
 
-def render(current: str) -> str:
+def render(current: str, image: str) -> str:
     """Replace both generated regions in the document."""
     updated = _replace_region(
         current, FIELD_REFERENCE_BEGIN, FIELD_REFERENCE_END, build_field_reference()
     )
     updated = _replace_region(
-        updated, EXAMPLES_BEGIN, EXAMPLES_END, build_examples(_example_records())
+        updated, EXAMPLES_BEGIN, EXAMPLES_END, build_examples(_example_records(image))
     )
     return updated
 
@@ -274,15 +278,14 @@ def main() -> int:
         help="Regenerate only the field tables; do not execute a run for examples. "
         "The examples are the slow part, and they only change when a model does.",
     )
+    parser.add_argument(
+        "--image",
+        default="archipelago-worker:latest",
+        help="Worker image for the example run. It must already exist and be current.",
+    )
     args = parser.parse_args()
 
     current = DOCUMENT.read_text(encoding="utf-8")
-    if args.fields_only:
-        updated = _replace_region(
-            current, FIELD_REFERENCE_BEGIN, FIELD_REFERENCE_END, build_field_reference()
-        )
-    else:
-        updated = render(current)
 
     if args.check:
         expected = _replace_region(
@@ -299,6 +302,12 @@ def main() -> int:
         print(f"{DOCUMENT} is current (schema {SCHEMA_VERSION}).")
         return 0
 
+    if args.fields_only:
+        updated = _replace_region(
+            current, FIELD_REFERENCE_BEGIN, FIELD_REFERENCE_END, build_field_reference()
+        )
+    else:
+        updated = render(current, args.image)
     DOCUMENT.write_text(updated, encoding="utf-8")
     print(f"Regenerated {DOCUMENT} for schema {SCHEMA_VERSION}.")
     return 0

@@ -159,12 +159,8 @@ class TerminationConfig(_Base):
 
 
 class ExecutionConfig(_Base):
-    """How islands are launched."""
+    """How the master and its island containers talk to each other."""
 
-    backend: Literal["docker", "local"] = Field(
-        default="docker",
-        description="'docker' (the default) gives each island its own container, which is what the project's island model means by a node. 'local' runs each island as a subprocess on this host instead -- same code, same protocol, no container runtime needed, which is what makes the harness testable in CI.",
-    )
     control_host: str = Field(
         default="127.0.0.1", description="Address the master binds for control and log collection."
     )
@@ -173,12 +169,12 @@ class ExecutionConfig(_Base):
     )
     advertise_host: str | None = Field(
         default=None,
-        description="Address workers use to reach the master. Defaults to control_host for the local backend and to the Docker host gateway for the docker backend.",
+        description="Address workers use to reach the master. Defaults to the master's alias on the run's network when the master is itself a container, to control_host when the islands share the host network, and to the Docker host gateway otherwise.",
     )
     connect_timeout_seconds: float = Field(
         default=60.0,
         gt=0.0,
-        description="How long a worker retries the master's control socket at startup before giving up and running standalone (no migration). Containers start slower than subprocesses, so this needs headroom under the docker backend.",
+        description="How long a worker retries the master's control socket at startup before giving up and running standalone (no migration). Containers can take several seconds to start, so this needs headroom.",
     )
     heartbeat_interval_seconds: float = Field(
         default=2.0,
@@ -189,9 +185,6 @@ class ExecutionConfig(_Base):
         default=20.0,
         gt=0.0,
         description="How long a worker gets to finish its generation and flush its logs after being asked to stop, before it is killed.",
-    )
-    worker_python: str | None = Field(
-        default=None, description="Interpreter for local-backend workers. Defaults to sys.executable."
     )
 
 

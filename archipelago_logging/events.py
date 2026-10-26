@@ -154,7 +154,10 @@ class RunStartEvent(BaseEvent):
         description="The generation count the population size was derived to land near. A target, not a limit: a run normally ends on stagnation before reaching it.",
     )
     max_generations: int = Field(description="Safety cap on generations.")
-    backend: str = Field(description="Execution backend: 'local' or 'docker'.")
+    backend: str = Field(
+        description="Execution backend that launched the islands: 'docker'. Logs written "
+        "before the local backend was removed may say 'local'."
+    )
     datasets: dict[str, Any] = Field(
         default_factory=dict,
         description="Provenance of the benchmark instance actually used: name, source (file path or generator), and the SHA-256 of the instance file where there is one.",

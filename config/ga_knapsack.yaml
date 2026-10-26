@@ -43,9 +43,6 @@ logging:
   output_dir: runs
   genome_mode: compact
 
-execution:
-  backend: docker      # the default; each island gets its own container
-
 docker:
   image: archipelago-worker:latest
   build: true          # built automatically if missing or older than the sources

@@ -46,8 +46,7 @@ class DockerBackend(ExecutionBackend):
             import docker
         except ImportError as exc:
             raise DockerUnavailable(
-                "the `docker` Python SDK is not installed; `pip install docker`, "
-                "or set execution.backend: local"
+                "the `docker` Python SDK is not installed; `pip install docker`"
             ) from exc
 
         try:
@@ -56,7 +55,7 @@ class DockerBackend(ExecutionBackend):
         except Exception as exc:
             raise DockerUnavailable(
                 f"cannot reach the Docker daemon ({exc}). Check that it is running and that "
-                "this user is in the `docker` group, or set execution.backend: local"
+                "this user is in the `docker` group"
             ) from exc
 
         self.image = image

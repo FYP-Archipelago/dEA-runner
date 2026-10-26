@@ -29,7 +29,7 @@
 # Mounting the Docker socket grants this container effective root on the host.
 # That is a real trade, made knowingly: the alternative is running the master on
 # the host with `python -m orchestrator.cli run`, which is fully supported and is
-# what the local backend and the tests use.
+# what the tests do: the master on the host, each island still in a container.
 
 FROM python:3.12-slim
 

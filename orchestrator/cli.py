@@ -65,7 +65,7 @@ def _print_plan(config) -> None:
           f"  every {config.migration.interval} gen"
           f"  x{config.migration.num_migrants} ({config.migration.selection} -> "
           f"{config.migration.replacement}, fanout={config.migration.fanout})")
-    print(f"  backend        {config.execution.backend}")
+    print(f"  worker image   {config.docker.image}")
 
 
 def _command_validate(args: argparse.Namespace) -> int:
@@ -107,8 +107,7 @@ def _command_run(args: argparse.Namespace) -> int:
         )
         return 2
 
-    print(f"Starting run: {config.algorithm} on {config.benchmark} "
-          f"[{config.execution.backend} backend]")
+    print(f"Starting run: {config.algorithm} on {config.benchmark}")
     _print_plan(config)
     print()
     summary = Master(config).run()
