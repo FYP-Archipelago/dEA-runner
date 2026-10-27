@@ -2,23 +2,19 @@
 
 from __future__ import annotations
 
-import os
 import socket
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..config import BROKER_URL_ENV
+from ..config import ISLAND_CONFIG_ENV
 
 __all__ = [
     "DockerBackend",
     "DockerUnavailable",
     "IslandSpec",
     "IslandContainerStatus",
-    "HOST_RUNS_DIR_ENV",
 ]
-
-HOST_RUNS_DIR_ENV = "HOST_RUNS_DIR"
 
 
 @dataclass
@@ -27,11 +23,9 @@ class IslandSpec:
 
     island_id: int
     run_id: str
-    config_path: Path
-    output_dir: Path
+    config_json: str
     control_host: str
     control_port: int
-    broker_url: str
 
 
 @dataclass
@@ -64,7 +58,6 @@ class DockerBackend:
         cpus: float = 1.0,
         memory: str = "2g",
         repository_root: Path | None = None,
-        logging_output_root: Path | None = None,
     ) -> None:
         try:
             import docker
@@ -96,9 +89,6 @@ class DockerBackend:
             "archipelago.run_id": run_id,
         }
         self.repository_root = Path(repository_root or Path(__file__).resolve().parents[2])
-        self.logging_output_root = (
-            Path(logging_output_root).resolve() if logging_output_root is not None else None
-        )
 
         self._containers: dict[int, Any] = {}
         self._node_ids: dict[int, str] = {}
@@ -276,59 +266,32 @@ class DockerBackend:
         """This island's container name, and its ``node_id`` in the log."""
         return f"archipelago-{run_id[-8:]}-island-{island_id:02d}"
 
-    def _host_mount_source(self, path: Path) -> str:
-        """Translate one of *our* paths into the host path the daemon must mount."""
-        host_root = os.environ.get(HOST_RUNS_DIR_ENV)
-        if not host_root or self.logging_output_root is None:
-            return str(path)
-        try:
-            relative = path.resolve().relative_to(self.logging_output_root)
-        except ValueError:
-            return str(path)
-        return str(Path(host_root) / relative)
-
     def launch(self, spec: IslandSpec) -> str:
         """Create and start one island's container."""
-        output_dir = spec.output_dir.resolve()
         command = [
-            "--config",
-            str(spec.config_path),
             "--run-id",
             spec.run_id,
             "--island-id",
             str(spec.island_id),
-            "--output-dir",
-            str(output_dir),
             "--control-host",
             spec.control_host,
             "--control-port",
             str(spec.control_port),
         ]
-
         container_name = self.container_name(spec.run_id, spec.island_id)
         environment = {
             "PYTHONUNBUFFERED": "1",
             "IN_ARCHIPELAGO_CONTAINER": "1",
             "ISLAND_CONTAINER_NAME": container_name,
-            # The resolved config on disk carries a redacted URL; the real one travels here.
-            BROKER_URL_ENV: spec.broker_url,
+            ISLAND_CONFIG_ENV: spec.config_json,
         }
-
-        output_dir.mkdir(parents=True, exist_ok=True)
-        volumes = {self._host_mount_source(output_dir): {"bind": str(output_dir), "mode": "rw"}}
-
         container = self.client.containers.create(
             self.image,
             command=command,
             name=container_name,
             labels={**self.labels, "archipelago.island_id": str(spec.island_id)},
             environment=environment,
-            volumes=volumes,
             network=self.island_network,
-            extra_hosts=(
-                {} if self.island_network == "host"
-                else {"host.docker.internal": "host-gateway"}
-            ),
             nano_cpus=int(self.cpus * 1e9),
             mem_limit=self.memory,
             auto_remove=False,
@@ -340,6 +303,23 @@ class DockerBackend:
         container.start()
         self._node_ids[spec.island_id] = container_name
         return container_name
+
+    def exit_report(self, island_id: int, tail: int = 40) -> dict[str, Any]:
+        """An island container's exit code and the last lines of its output.
+
+        Read before :meth:`cleanup` removes the container, so a failure that never reached the
+        master (a crash before the island could say goodbye) is still explained.
+        """
+        container = self._containers.get(island_id)
+        if container is None:
+            return {"exit_code": None, "log_tail": "no container was created for this island"}
+        try:
+            container.reload()
+            exit_code = container.attrs.get("State", {}).get("ExitCode")
+            log_tail = container.logs(tail=tail).decode("utf-8", errors="replace")
+        except Exception as exc:
+            return {"exit_code": None, "log_tail": f"could not read the container: {exc}"}
+        return {"exit_code": exit_code, "log_tail": log_tail.strip()}
 
     def statuses(self) -> dict[int, IslandContainerStatus]:
         """Poll container states."""
@@ -357,13 +337,24 @@ class DockerBackend:
             )
         return result
 
-    def stop_all(self, grace_seconds: float = 15.0) -> None:
-        """Ask every running container to stop, within the grace period."""
+    def signal_all(self, signal: str = "SIGTERM") -> None:
+        """Send a signal to every island container still running, without waiting."""
         for container in self._containers.values():
             try:
                 container.reload()
                 if container.attrs.get("State", {}).get("Running"):
-                    container.stop(timeout=int(grace_seconds))
+                    container.kill(signal=signal)
+            except Exception:
+                pass
+
+    def kill(self, island_ids: list[int]) -> None:
+        """Kill these islands' containers now."""
+        for island_id in island_ids:
+            container = self._containers.get(island_id)
+            if container is None:
+                continue
+            try:
+                container.kill()
             except Exception:
                 pass
 

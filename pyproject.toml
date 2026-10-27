@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "archipelago-baseline-dea"
-version = "0.1.0"
+version = "0.4.0"
 description = "Baseline distributed evolutionary algorithm harness and standardized event log for the Archipelago explainability framework"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "pyflakes>=3.0"]
 
 [project.scripts]
 archipelago = "orchestrator.cli:main"

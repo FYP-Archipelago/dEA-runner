@@ -44,7 +44,6 @@ migration:
   phase_jitter: 3      # break the artificial lockstep between islands
 
 logging:
-  output_dir: runs
   genome_mode: compact
   genome_precision_decimals: 4
 

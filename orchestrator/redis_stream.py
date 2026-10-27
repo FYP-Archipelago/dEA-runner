@@ -178,13 +178,15 @@ class RedisStreamWriter(Sink):
         *,
         buffer_records: int,
         stall_seconds: float,
-        socket_timeout: float = 5.0,
+        socket_timeout: float | None = None,
         batch_records: int = BATCH_RECORDS,
         batch_seconds: float = BATCH_SECONDS,
     ) -> None:
         super().__init__()
         self.key = key
         self._stall_seconds = stall_seconds
+        # A reply blocked for longer than the stall budget is already a stall.
+        socket_timeout = socket_timeout if socket_timeout is not None else min(5.0, stall_seconds)
         self._batch_records = batch_records
         self._batch_seconds = batch_seconds
         pool = redis.ConnectionPool.from_url(
@@ -227,7 +229,7 @@ class RedisStreamWriter(Sink):
 
     def _put(self, item: tuple[str, str] | _Barrier) -> None:
         while True:
-            self._raise_if_failed()
+            self.raise_if_failed()
             try:
                 self._queue.put(item, timeout=_POLL_SECONDS)
                 return
@@ -237,9 +239,15 @@ class RedisStreamWriter(Sink):
     def _await(self, barrier: _Barrier) -> None:
         self._put(barrier)
         while not barrier.reached.wait(_POLL_SECONDS):
-            self._raise_if_failed()
+            self.raise_if_failed()
 
-    def _raise_if_failed(self) -> None:
+    @property
+    def failed(self) -> bool:
+        """Whether the writer has given up: nothing more it is handed can reach Redis."""
+        return self._failure is not None
+
+    def raise_if_failed(self) -> None:
+        """Raise the writer's :class:`BrokerError` if it has given up."""
         if self._failure is not None:
             raise self._failure
 

@@ -16,7 +16,6 @@ __all__ = [
     "SYMBOLIC_BENCHMARKS",
     "REAL_REGRESSION_DATASETS",
     "load_regression_table",
-    "load_regression_csv",
     "INVALID_FITNESS",
 ]
 
@@ -188,9 +187,6 @@ def load_regression_table(
     x = np.delete(matrix, index, axis=1)
     variable_names = [name for position, name in enumerate(names) if position != index]
     return x, y, variable_names
-
-
-load_regression_csv = load_regression_table
 
 
 REAL_REGRESSION_DATASETS: dict[str, dict[str, Any]] = {

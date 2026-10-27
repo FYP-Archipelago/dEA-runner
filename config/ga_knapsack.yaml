@@ -38,7 +38,6 @@ migration:
   fanout: round_robin     # one neighbour per event, so migrant volume matches the ring configs
 
 logging:
-  output_dir: runs
   genome_mode: compact
 
 docker:

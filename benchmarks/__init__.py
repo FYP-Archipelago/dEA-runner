@@ -29,7 +29,7 @@ from .registry import (
     create_problem,
     register,
 )
-from .symbolic import SYMBOLIC_BENCHMARKS, SymbolicRegression, load_regression_csv
+from .symbolic import SYMBOLIC_BENCHMARKS, SymbolicRegression
 from .tsp import TSP, TSPInstance, load_tsplib_file
 
 __all__ = [
@@ -58,7 +58,6 @@ __all__ = [
     "load_tsplib_file",
     "SymbolicRegression",
     "SYMBOLIC_BENCHMARKS",
-    "load_regression_csv",
     "create_problem",
     "available_benchmarks",
     "benchmark_domain",

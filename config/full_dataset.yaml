@@ -46,7 +46,6 @@ migration:
   phase_jitter: 4
 
 logging:
-  output_dir: runs
   genome_mode: compact
   genome_precision_decimals: 4
 

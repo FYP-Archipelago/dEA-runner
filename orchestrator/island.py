@@ -1,17 +1,21 @@
-"""Island container entrypoint."""
+"""Island container entrypoint.
+
+The master starts one of these per island. The run's configuration arrives as JSON in the
+``ISLAND_CONFIG`` environment variable, records go straight to Redis, and the island's result goes
+back to the master in its goodbye message. Nothing is read from or written to disk.
+"""
 
 from __future__ import annotations
 
 import argparse
-import dataclasses
-import json
+import os
 import signal
 import sys
-from pathlib import Path
+import traceback
 from typing import Any
 
-from orchestrator.config import RunConfig, load_config
-from orchestrator.island_runner import IslandRunner
+from orchestrator.config import ISLAND_CONFIG_ENV, RunConfig
+from orchestrator.island_runner import IslandResult, IslandRunner
 
 __all__ = ["main", "run_island"]
 
@@ -19,13 +23,11 @@ __all__ = ["main", "run_island"]
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="orchestrator.island",
-        description="Run a single Archipelago island. Normally launched by the master, "
-        "but runnable by hand for debugging one island in isolation.",
+        description=f"Run a single Archipelago island, configured by ${ISLAND_CONFIG_ENV}. "
+        "Normally launched by the master, but runnable by hand for debugging one island.",
     )
-    parser.add_argument("--config", required=True, help="Path to the resolved run config YAML.")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--island-id", type=int, required=True)
-    parser.add_argument("--output-dir", required=True)
     parser.add_argument(
         "--control-host",
         default=None,
@@ -40,26 +42,13 @@ def run_island(
     *,
     run_id: str,
     island_id: int,
-    output_dir: Path,
     control_address: tuple[str, int] | None,
-) -> dict[str, Any]:
-    """Run one island and return its result as a plain dict."""
-    runner = IslandRunner(
-        config,
-        island_id,
-        run_id,
-        output_dir=output_dir,
-        control_address=control_address,
-    )
+) -> IslandResult:
+    """Run one island to completion and return its result."""
+    runner = IslandRunner(config, island_id, run_id, control_address=control_address)
 
     def _handle_stop(signum: int, _frame: Any) -> None:
-        runner.config.termination.max_generations = min(
-            runner.config.termination.max_generations, max(1, runner.ctx.generation)
-        )
-        runner.logger.diagnostic(
-            f"received signal {signum}; winding down at the end of this generation",
-            level="warning",
-        )
+        runner.request_stop(f"received signal {signum}")
 
     for received in (signal.SIGTERM, signal.SIGINT):
         try:
@@ -67,50 +56,29 @@ def run_island(
         except (ValueError, OSError):
             pass
 
-    return dataclasses.asdict(runner.run())
+    return runner.run()
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run one island and write its result file."""
+    """Run one island; exit non-zero if it failed."""
     args = _parse_args(argv)
-    output_dir = Path(args.output_dir)
     control_address = (
         (args.control_host, args.control_port) if args.control_host and args.control_port else None
     )
-
-    config = load_config(args.config)
-
-    result_path = output_dir / "islands" / f"island-{args.island_id:02d}.result.json"
-    result_path.parent.mkdir(parents=True, exist_ok=True)
-
     try:
+        config = RunConfig.model_validate_json(os.environ[ISLAND_CONFIG_ENV])
         result = run_island(
-            config,
-            run_id=args.run_id,
-            island_id=args.island_id,
-            output_dir=output_dir,
-            control_address=control_address,
+            config, run_id=args.run_id, island_id=args.island_id, control_address=control_address
         )
-    except Exception as exc:
-        import traceback
-
-        result_path.write_text(
-            json.dumps(
-                {
-                    "island_id": args.island_id,
-                    "termination_reason": "error",
-                    "error": f"{type(exc).__name__}: {exc}",
-                    "traceback": traceback.format_exc(),
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+    except Exception:
+        # The island never got as far as reporting; the master reads this from the
+        # container's log when the container exits without a goodbye.
         traceback.print_exc()
         return 1
-
-    result_path.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
-    return 0 if result.get("error") is None else 1
+    if result.error is not None:
+        print(f"island {args.island_id} failed: {result.error}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

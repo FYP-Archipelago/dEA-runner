@@ -1,0 +1,15 @@
+# A dummy Worker Pool worker for the local compose stack: it prints every record that
+# lands in a run:*:raw stream. Depends on redis-py only, as a real worker would.
+#
+#   docker build --network=host -f docker/Dockerfile.dummy-worker -t archipelago-dummy-worker:latest .
+
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+RUN pip install --no-cache-dir "redis>=5.0"
+COPY scripts/dummy_worker.py /dummy_worker.py
+
+USER nobody
+ENTRYPOINT ["python", "/dummy_worker.py"]

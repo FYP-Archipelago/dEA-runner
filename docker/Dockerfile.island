@@ -23,14 +23,13 @@ COPY algorithms/ ./algorithms/
 COPY benchmarks/ ./benchmarks/
 COPY orchestrator/ ./orchestrator/
 
-# Run as an unprivileged user. The run's output directory is bind-mounted from
-# the host, so this uid must be able to write there; the master creates the
-# directory before launching any container.
+# Run as an unprivileged user: an island needs no file system access beyond its code.
+# Its config arrives in the ISLAND_CONFIG environment variable, its records go to
+# Redis, and its result goes back to the master over the control channel.
 RUN useradd --create-home --uid 1000 archipelago \
     && chown -R archipelago:archipelago /archipelago
 USER archipelago
 
-# Overridden by the master with the island id, run id, config path and control
-# address. Present so `docker run archipelago-island:latest --help` is useful.
+# Overridden by the master with the island id, run id and control address. Present so `docker run archipelago-island:latest --help` is useful.
 ENTRYPOINT ["python", "-m", "orchestrator.island"]
 CMD ["--help"]

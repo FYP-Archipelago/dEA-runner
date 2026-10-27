@@ -40,7 +40,6 @@ migration:
   replacement: worst
 
 logging:
-  output_dir: runs
   genome_mode: compact
 
 docker:

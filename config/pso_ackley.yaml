@@ -39,7 +39,6 @@ migration:
   fanout: one_random
 
 logging:
-  output_dir: runs
   genome_mode: compact
 
 docker:

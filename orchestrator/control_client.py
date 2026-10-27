@@ -181,6 +181,6 @@ class ControlClient:
         )
         return bool(response and response.get("stop"))
 
-    def bye(self, *, generation: int, evaluations: int) -> None:
-        """Tell the master this island finished cleanly."""
-        self.call(Op.BYE, generation=generation, evaluations=evaluations)
+    def bye(self, *, generation: int, evaluations: int, result: dict[str, Any]) -> None:
+        """Tell the master this island is done, and hand it the island's result."""
+        self.call(Op.BYE, generation=generation, evaluations=evaluations, result=result)

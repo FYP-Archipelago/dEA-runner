@@ -109,6 +109,7 @@ def validate_log(
     counts: dict[str, int] = {}
     next_seq: dict[str, int] = {}
     next_eval_index: dict[int, int] = {}
+    islands: set[int] = set()
     run_ids: set[str] = set()
     send_ids: set[str] = set()
     arrive_ids: set[str] = set()
@@ -140,6 +141,8 @@ def validate_log(
                 "due; its records were lost, repeated or reordered in transit"
             )
         next_seq[event.emitter] = expected + 1
+        if event.emitter.startswith("island:"):
+            islands.add(event.island_id)
 
         if event.type == EventType.EVALUATION.value:
             island = event.island_id
@@ -181,7 +184,7 @@ def validate_log(
         "run_id": next(iter(run_ids)),
         "counts": counts,
         "emitters": sorted(next_seq),
-        "islands": sorted(next_eval_index),
+        "islands": sorted(islands),
         "evaluations_per_island": dict(sorted(next_eval_index.items())),
         "total_evaluations": counts.get(EventType.EVALUATION.value, 0),
         "migration_sends": len(send_ids),

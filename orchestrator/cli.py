@@ -9,8 +9,19 @@ from .config import load_config, redact_url
 
 __all__ = ["main"]
 
-def _add_config_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--config", "-c", default=None, help="Path to a run config YAML.")
+def _add_config_arguments(parser: argparse.ArgumentParser, *, many: bool = False) -> None:
+    if many:
+        parser.add_argument(
+            "--config",
+            "-c",
+            dest="configs",
+            action="extend",
+            nargs="+",
+            default=[],
+            help="Run config YAML. Give several (repeated, or space-separated) to run them in turn.",
+        )
+    else:
+        parser.add_argument("--config", "-c", default=None, help="Path to a run config YAML.")
     parser.add_argument(
         "--set",
         dest="overrides",
@@ -76,16 +87,41 @@ def _command_validate(args: argparse.Namespace) -> int:
 def _command_run(args: argparse.Namespace) -> int:
     from .master import Master
 
-    config = load_config(args.config, overrides=args.overrides)
+    paths = args.configs or [None]
+    configs = [load_config(path, overrides=args.overrides) for path in paths]
 
-    print(f"Starting run: {config.algorithm} on {config.benchmark}")
-    _print_plan(config)
-    print()
-    summary = Master(config).run()
+    outcomes: list[tuple[str, str, bool]] = []
+    for number, (path, config) in enumerate(zip(paths, configs), start=1):
+        if len(configs) > 1:
+            print(f"=== Run {number} of {len(configs)}: {path}")
+        print(f"Starting run: {config.algorithm} on {config.benchmark}")
+        _print_plan(config)
+        print()
+        try:
+            summary = Master(config).run()
+        except Exception as exc:
+            print(f"\nRun failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            outcomes.append((str(path), "failed to run", False))
+            continue
+        _print_summary(config, summary)
+        outcomes.append(
+            (
+                f"{path} -> {summary.run_id}",
+                f"{summary.termination_reason}, {summary.islands_failed} island(s) failed",
+                summary.islands_failed == 0,
+            )
+        )
 
+    if len(configs) > 1:
+        print("\n=== All runs")
+        for label, outcome, _ok in outcomes:
+            print(f"  {label}: {outcome}")
+    return 0 if all(ok for _, _, ok in outcomes) else 1
+
+
+def _print_summary(config, summary) -> None:
     print(f"\nRun {summary.run_id} finished: {summary.termination_reason} "
           f"in {summary.wallclock_seconds:.1f}s")
-    print(f"  output           {summary.output_dir}")
     print(f"  records          {summary.stream_key}")
     print(f"  islands          {summary.islands_completed} completed, {summary.islands_failed} failed")
     print(f"  evaluations      {summary.total_evaluations:,} "
@@ -93,12 +129,13 @@ def _command_run(args: argparse.Namespace) -> int:
     print(f"  migration events {summary.total_migration_events} "
           f"({summary.total_migrants} individuals)")
     print(f"  global best      {summary.global_best_fitness} (island {summary.global_best_island})")
+    if summary.error is not None:
+        print(f"  error            {summary.error}")
     for island, entry in sorted(summary.per_island.items()):
         print(f"    island {island}  {entry.get('termination_reason', '?'):<24} "
               f"gen {entry.get('generation', 0):<5} "
               f"evals {entry.get('evaluations', 0):<7,} "
               f"best {entry.get('best_fitness')}")
-    return 0 if summary.islands_failed == 0 else 1
 
 
 def _command_verify_log(args: argparse.Namespace) -> int:
@@ -125,8 +162,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    run_parser = subparsers.add_parser("run", help="Execute a run.")
-    _add_config_arguments(run_parser)
+    run_parser = subparsers.add_parser("run", help="Execute one run, or several in turn.")
+    _add_config_arguments(run_parser, many=True)
     run_parser.set_defaults(handler=_command_run)
 
     validate_parser = subparsers.add_parser(

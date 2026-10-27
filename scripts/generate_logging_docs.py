@@ -114,48 +114,40 @@ def build_field_reference() -> str:
 
 def _example_records(image: str, broker_url: str) -> dict[str, list[dict[str, Any]]]:
     """Capture one real record of each type by running a tiny archipelago."""
-    import shutil
-    import tempfile
-
     from orchestrator.config import RunConfig
     from orchestrator.master import Master
     from orchestrator.redis_stream import read_stream
 
-    workspace = Path(tempfile.mkdtemp(prefix="archipelago-docs-"))
-    try:
-        config = RunConfig(
-            algorithm="de",
-            benchmark="sphere",
-            benchmark_params={"dimension": 3},
-            evaluation_budget=320,
-            target_generations=8,
-            num_islands=4,
-            description="documentation example run.",
-            termination={"stagnation_generations": 0, "max_generations": 50},
-            migration={
-                "topology": "ring",
-                "interval": 2,
-                "num_migrants": 2,
-                "selection": "best",
-                "replacement": "worst",
-            },
-            logging={"output_dir": str(workspace)},
-            docker={"image": image, "build": False},
-            broker={"url": broker_url},
-        )
-        summary = Master(config, repository_root=REPOSITORY_ROOT).run()
+    config = RunConfig(
+        algorithm="de",
+        benchmark="sphere",
+        benchmark_params={"dimension": 3},
+        evaluation_budget=320,
+        target_generations=8,
+        num_islands=4,
+        description="documentation example run.",
+        termination={"stagnation_generations": 0, "max_generations": 50},
+        migration={
+            "topology": "ring",
+            "interval": 2,
+            "num_migrants": 2,
+            "selection": "best",
+            "replacement": "worst",
+        },
+        docker={"image": image, "build": False},
+        broker={"url": broker_url},
+    )
+    summary = Master(config, repository_root=REPOSITORY_ROOT).run()
 
-        examples: dict[str, list[dict[str, Any]]] = {}
-        for record in read_stream(broker_url, summary.stream_key):
-            examples.setdefault(record["type"], []).append(record)
+    examples: dict[str, list[dict[str, Any]]] = {}
+    for record in read_stream(broker_url, summary.stream_key):
+        examples.setdefault(record["type"], []).append(record)
 
-        evaluations = examples.get("evaluation", [])
-        with_parents = next((record for record in evaluations if record.get("parent_ids")), None)
-        examples["evaluation"] = [evaluations[0]] + ([with_parents] if with_parents else [])
-        return {type_name: found[:2] if type_name == "evaluation" else found[:1]
-                for type_name, found in examples.items()}
-    finally:
-        shutil.rmtree(workspace, ignore_errors=True)
+    evaluations = examples.get("evaluation", [])
+    with_parents = next((record for record in evaluations if record.get("parent_ids")), None)
+    examples["evaluation"] = [evaluations[0]] + ([with_parents] if with_parents else [])
+    return {type_name: found[:2] if type_name == "evaluation" else found[:1]
+            for type_name, found in examples.items()}
 
 
 def _truncate_for_display(record: dict[str, Any]) -> dict[str, Any]:

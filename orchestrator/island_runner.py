@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import socket
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -75,14 +75,12 @@ class IslandRunner:
         island_id: int,
         run_id: str,
         *,
-        output_dir: Path,
         control_address: tuple[str, int] | None = None,
         container_id: str | None = None,
     ) -> None:
         self.config = config
         self.island_id = island_id
         self.run_id = run_id
-        self.output_dir = Path(output_dir)
         self.control_address = control_address
         self.node_id = resolve_node_id(island_id)
         if container_id is None and (
@@ -166,17 +164,27 @@ class IslandRunner:
 
         self._generations_since_improvement = 0
         self._last_improvement_fitness = self.problem.worst_possible()
+        self._population: list[Individual] = []
+        self._stop_reason: str | None = None
+
+    def request_stop(self, reason: str) -> None:
+        """Ask the island to wind down at the end of its current generation.
+
+        Safe to call from a signal handler: it only sets a flag, and the loop does the logging.
+        """
+        self._stop_reason = reason
 
 
-    def _start_island(self) -> None:
+    def _connect_control(self) -> int | None:
+        """Reach the master, measure the clock offset and report ready; the round trip, if any."""
         if self.control is not None and self.control.connect():
             offset = self.control.measure_offset()
             self.clock_offset_ns = offset.offset_ns
             self.control.ready(self.clock_offset_ns)
-            rtt_ns: int | None = offset.rtt_ns
-        else:
-            rtt_ns = None
+            return offset.rtt_ns
+        return None
 
+    def _log_island_start(self, rtt_ns: int | None) -> None:
         self.logger.island_start(
             algorithm=self.config.algorithm,
             algorithm_params=self.algorithm.describe(),
@@ -196,16 +204,33 @@ class IslandRunner:
             evaluation_budget=self.budget,
         )
 
-    def _finish(self) -> None:
-        if self.control is not None:
-            self.control.bye(generation=self.ctx.generation, evaluations=self.ctx.evaluations)
-            self.control.close()
-        self.logger.close()
+    def _report(self, result: IslandResult) -> IslandResult:
+        """Wait until Redis holds every record, then say goodbye to the master with the result.
 
-    def _abandon(self) -> None:
-        """Leave without a word: with Redis unreachable, nothing more can be logged."""
+        ``BYE`` therefore means: every record this island will ever write is in Redis. If the
+        flush fails, the result says so instead.
+        """
+        try:
+            self.logger.flush()
+        except BrokerError as exc:
+            if result.error is None:
+                result = dataclasses.replace(
+                    result,
+                    termination_reason=TerminationReason.ERROR.value,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
         if self.control is not None:
+            self.control.bye(
+                generation=self.ctx.generation,
+                evaluations=self.ctx.evaluations,
+                result=dataclasses.asdict(result),
+            )
             self.control.close()
+        try:
+            self.logger.close()
+        except BrokerError:
+            pass  # already in the result
+        return result
 
 
     def _migration_active(self) -> bool:
@@ -447,19 +472,36 @@ class IslandRunner:
 
 
     def run(self) -> IslandResult:
-        """Run this island to completion and return its summary."""
+        """Run this island to completion, report to the master, and return the result."""
         started = time.monotonic()
+        try:
+            termination, error = self._evolve(started)
+            result = self._result(termination, error, started)
+            self.logger.island_end(**self._island_end_fields(result))
+        except BrokerError as exc:
+            # Redis is out of reach: nothing more can be logged, but the master can be told.
+            result = self._result(
+                TerminationReason.ERROR.value, f"{type(exc).__name__}: {exc}", started
+            )
+        return self._report(result)
+
+    def _evolve(self, started: float) -> tuple[str, str | None]:
+        """The island loop: the termination reason, and the error text if it failed.
+
+        A ``BrokerError`` propagates: once Redis is gone there is nothing left to log.
+        """
         termination = TerminationReason.MAX_GENERATIONS.value
-        error: str | None = None
         population: list[Individual] = []
         limit = self.config.termination.time_limit_seconds
         deadline = started + limit if limit is not None else None
 
         try:
+            rtt_ns = self._connect_control()
             ping_broker(self.config.broker.url, self.config.broker.connect_timeout_seconds)
-            self._start_island()
+            self._log_island_start(rtt_ns)
             self.ctx.generation = 0
             population = self.algorithm.initialize(self.population_size)
+            self._population = population
             self._update_stagnation()
             self._emit_generation_end(population, 0, time.monotonic() - started, 0, 0)
 
@@ -474,6 +516,7 @@ class IslandRunner:
                 self.ctx.evaluations_this_generation = 0
 
                 population = self.algorithm.step(population)
+                self._population = population
                 self._update_stagnation()
 
                 migrants_out = migrants_in = 0
@@ -525,77 +568,72 @@ class IslandRunner:
                 if deadline is not None and now >= deadline:
                     termination = TerminationReason.TIME_LIMIT.value
                     break
+                if self._stop_reason is not None:
+                    termination = TerminationReason.ABORTED.value
+                    self.logger.diagnostic(
+                        f"{self._stop_reason}; stopping at the end of this generation",
+                        level="warning",
+                    )
+                    break
             else:
                 termination = TerminationReason.MAX_GENERATIONS.value
 
         except BrokerError:
-            self._abandon()
             raise
         except Exception as exc:
-            termination = TerminationReason.ERROR.value
             error = f"{type(exc).__name__}: {exc}"
             self.logger.diagnostic(f"island failed: {error}", level="error")
+            return TerminationReason.ERROR.value, error
+        return termination, None
 
-        summary = self._algorithm_summary(population)
+    def _result(self, termination: str, error: str | None, started: float) -> IslandResult:
+        """What this island reports to the master, from its state now."""
         best = self.ctx.best_individual
-        best_hash = (
-            self.genome_policy.encode(
-                self.algorithm.genome_encoding, self.algorithm.genome_for_log(best)
-            ).genome_hash
-            if best is not None
-            else None
-        )
-        control_channel = {
-            "control_available": bool(self.control and self.control.available),
-            "failed_control_calls": self.control.failed_calls if self.control else 0,
-            "last_control_error": self.control.last_error if self.control else None,
-        }
-        broker = {
-            "acknowledged": self.writer.stats.written,
-            "errors": self.writer.stats.errors,
-            "last_error": self.writer.stats.last_error,
-        }
-
-        elapsed = time.monotonic() - started
-        self.logger.island_end(
-            generation=self.ctx.generation,
-            termination_reason=termination,
-            generations_completed=self.ctx.generation,
-            evaluations_total=self.ctx.evaluations,
-            best_fitness=None if best is None else float(best.fitness),
-            best_genome_hash=best_hash,
-            best_individual_id=None if best is None else best.individual_id,
-            best_genome=None if best is None else self.algorithm.best_genome_full(best),
-            migrations_sent=self.migrations_sent,
-            migrations_received=self.migrations_received,
-            migrants_sent=self.migrants_sent,
-            migrants_received=self.migrants_received,
-            wallclock_seconds=elapsed,
-            generations_since_improvement=self._generations_since_improvement,
-            algorithm_summary=summary,
-            control_channel={**control_channel, "broker": broker},
-        )
-        self._finish()
-
         return IslandResult(
             island_id=self.island_id,
             termination_reason=termination,
             generations_completed=self.ctx.generation,
             evaluations_total=self.ctx.evaluations,
             best_fitness=None if best is None else float(best.fitness),
-            best_genome_hash=best_hash,
+            best_genome_hash=(
+                None
+                if best is None
+                else self.genome_policy.encode(
+                    self.algorithm.genome_encoding, self.algorithm.genome_for_log(best)
+                ).genome_hash
+            ),
             best_individual_id=None if best is None else best.individual_id,
             best_genome=None if best is None else self.algorithm.best_genome_full(best),
             migrations_sent=self.migrations_sent,
             migrations_received=self.migrations_received,
             migrants_sent=self.migrants_sent,
             migrants_received=self.migrants_received,
-            wallclock_seconds=elapsed,
+            wallclock_seconds=time.monotonic() - started,
             generations_since_improvement=self._generations_since_improvement,
-            algorithm_summary=summary,
-            control_channel=control_channel,
+            algorithm_summary=self._algorithm_summary(self._population),
+            control_channel={
+                "control_available": bool(self.control and self.control.available),
+                "failed_control_calls": self.control.failed_calls if self.control else 0,
+                "last_control_error": self.control.last_error if self.control else None,
+            },
             error=error,
         )
+
+    def _island_end_fields(self, result: IslandResult) -> dict[str, Any]:
+        """The ``island_end`` record: the result, plus how the island's writer fared."""
+        fields = dataclasses.asdict(result)
+        fields.pop("island_id")
+        fields.pop("error")
+        fields["generation"] = self.ctx.generation
+        fields["control_channel"] = {
+            **result.control_channel,
+            "broker": {
+                "acknowledged": self.writer.stats.written,
+                "errors": self.writer.stats.errors,
+                "last_error": self.writer.stats.last_error,
+            },
+        }
+        return fields
 
     def _algorithm_summary(self, population: list[Individual]) -> dict[str, Any]:
         """Per-algorithm end-of-run facts, where the algorithm offers any."""

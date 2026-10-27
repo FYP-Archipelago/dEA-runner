@@ -9,10 +9,10 @@
 #   docker run -d --name redis --network archipelago redis:7-alpine --maxmemory-policy noeviction
 #   docker run --rm --network archipelago \
 #     -v /var/run/docker.sock:/var/run/docker.sock \
-#     -v "$PWD/runs:/archipelago/runs" \
-#     -e HOST_RUNS_DIR="$PWD/runs" \
 #     -e ARCHIPELAGO_BROKER__URL=redis://redis:6379/0 \
 #     archipelago-master:latest run --config config/docker_de_sphere.yaml
+#
+# Or let docker-compose.yml do all of that, with a dummy worker printing the stream.
 #
 # The run-time arguments are each load-bearing:
 #
@@ -23,17 +23,14 @@
 #                     host network cannot join the run's network.
 #   ARCHIPELAGO_BROKER__URL
 #                     where every record goes. A password in it is redacted wherever
-#                     the config is logged; islands receive the real URL by
-#                     environment variable.
+#                     the config is logged; islands receive the full config, real URL
+#                     included, in their ISLAND_CONFIG environment variable.
 #   docker.sock       the master creates and destroys sibling island containers,
 #                     so it needs a daemon. This is Docker-outside-of-Docker: the
-#                     islands are siblings of the master, not children.
-#   HOST_RUNS_DIR     a bind-mount source is resolved by the daemon against the
-#                     HOST filesystem, so the master must know the host path its
-#                     own /archipelago/runs came from before it can mount a run
-#                     directory into an island. Without it the islands get an empty
-#                     directory and die looking for their config file. (The run
-#                     directory and this variable go away in M4.4 of the plan.)
+#                     islands are siblings of the master, not children. Nothing is
+#                     shared through the filesystem: islands get their config by
+#                     environment variable and report their result over the control
+#                     channel.
 #
 # Mounting the Docker socket grants this container effective root on the host.
 # That is a real trade, made knowingly: the alternative is running the master on

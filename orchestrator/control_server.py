@@ -11,6 +11,7 @@ from typing import Any
 from archipelago_logging import EventLogger, MigrationIdMinter, wall_now
 
 from .protocol import Op, ProtocolError, iter_messages, recv_message, send_message
+from .redis_stream import BrokerError
 from .seeding import seed_for_broker
 from .topology import Topology
 
@@ -49,6 +50,7 @@ class IslandStatus:
     migrations_dispatched: int = 0
     migrations_delivered: int = 0
     migrants_dropped: int = 0
+    result: dict[str, Any] | None = None
 
 
 class ControlServer:
@@ -167,6 +169,17 @@ class ControlServer:
             with self._lock:
                 self.islands[island_id].connected = False
 
+    def _note(self, message: str, **context: Any) -> None:
+        """A diagnostic from a connection thread.
+
+        Dropped if the master's writer has failed or closed: the master's own loop notices a
+        failed writer and ends the run, and nothing may follow ``run_end``.
+        """
+        try:
+            self.logger.diagnostic(message, **context)
+        except (BrokerError, RuntimeError):
+            pass
+
     def _dispatch(self, island_id: int, message: dict[str, Any]) -> dict[str, Any]:
         operation = message.get("op")
 
@@ -194,7 +207,7 @@ class ControlServer:
             if self.evaluation_budget is not None and spent >= self.evaluation_budget:
                 if not self.stop_requested.is_set():
                     self.stop_requested.set()
-                    self.logger.diagnostic(
+                    self._note(
                         "archipelago evaluation budget reached; asking islands to wind down",
                         evaluation_budget=self.evaluation_budget,
                         evaluations_spent=spent,
@@ -204,6 +217,7 @@ class ControlServer:
             with self._lock:
                 status = self.islands[island_id]
                 status.finished = True
+                status.result = message.get("result")
                 status.generation = int(message.get("generation", status.generation))
                 status.evaluations = int(message.get("evaluations", status.evaluations))
             return {"ok": True}
@@ -257,7 +271,7 @@ class ControlServer:
                 if len(queue) >= self.max_pending:
                     dropped = queue.pop(0)
                     self.islands[destination].migrants_dropped += len(dropped.migrants)
-                    self.logger.diagnostic(
+                    self._note(
                         "migration queue full; dropped the oldest pending transfer",
                         level="warning",
                         island_id=destination,

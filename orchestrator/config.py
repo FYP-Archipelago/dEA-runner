@@ -26,11 +26,13 @@ __all__ = [
     "apply_overrides",
     "redact_url",
     "ENV_PREFIX",
-    "BROKER_URL_ENV",
+    "ISLAND_CONFIG_ENV",
 ]
 
 ENV_PREFIX = "ARCHIPELAGO_"
-BROKER_URL_ENV = f"{ENV_PREFIX}BROKER__URL"
+ISLAND_CONFIG_ENV = "ISLAND_CONFIG"
+"""Carries the run's full config, as JSON, into each island container. Deliberately outside the
+``ARCHIPELAGO_`` prefix, which is reserved for overriding single config fields."""
 
 
 def redact_url(url: str) -> str:
@@ -104,9 +106,8 @@ class MigrationConfig(_Base):
 
 
 class LoggingConfig(_Base):
-    """How genomes are logged, and where a run's other artefacts go."""
+    """How genomes are logged."""
 
-    output_dir: str = Field(default="runs", description="Parent directory; each run gets a subdirectory.")
     genome_mode: GenomeLogMode = Field(
         default=GenomeLogMode.COMPACT,
         description="compact | full. See archipelago_logging.genome. The genome hash is always written regardless of this setting.",
@@ -181,7 +182,7 @@ class ExecutionConfig(_Base):
     )
     advertise_host: str | None = Field(
         default=None,
-        description="Address islands use to reach the master. Defaults to the master's alias on the run's network when the master is itself a container, to control_host when the islands share the host network, and to the Docker host gateway otherwise.",
+        description="Address islands use to reach the master. Defaults to the master's alias on the run's network when the master is itself a container, and to control_host when the master is on the host (its islands then share the host network).",
     )
     connect_timeout_seconds: float = Field(
         default=60.0,
@@ -421,10 +422,6 @@ class RunConfig(_Base):
             ),
         }
 
-    def output_path(self, run_id: str) -> Path:
-        """Directory this run's artefacts are written to."""
-        return Path(self.logging.output_dir) / run_id
-
     def resolved(self) -> dict[str, Any]:
         """JSON-safe dict of the fully resolved config, for ``run_start.config``."""
         payload = self.model_dump(mode="json")
@@ -434,12 +431,6 @@ class RunConfig(_Base):
             "harness_version": HARNESS_VERSION,
         }
         return payload
-
-    def write_resolved(self, path: Path) -> Path:
-        """Write ``resolved_config.yaml`` beside the logs."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(yaml.safe_dump(self.resolved(), sort_keys=False), encoding="utf-8")
-        return path
 
 
 def _coerce(text: str) -> Any:
@@ -518,7 +509,10 @@ def load_config(
         loaded = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
         if not isinstance(loaded, dict):
             raise ValueError(f"{config_path}: top level of a run config must be a mapping")
+        # A run's run_start.config can be fed back in to repeat the run; these two keys are
+        # what the master added to it.
         loaded.pop("_meta", None)
+        loaded.pop("_runtime", None)
         document = loaded
 
     document = _deep_merge(document, _env_overrides(environ))
