@@ -42,20 +42,11 @@ from .logger import EventLogger
 from .reader import (
     LogValidationError,
     MigrationEdge,
-    iter_events,
-    iter_raw,
     join_migration_edges,
+    parse_records,
     validate_log,
 )
-from .sinks import (
-    CallbackSink,
-    JsonlFileSink,
-    MultiSink,
-    NetworkSink,
-    NullSink,
-    Sink,
-    TextLineFileSink,
-)
+from .sinks import CallbackSink, Sink, SinkStats
 from .version import HARNESS_VERSION, SCHEMA_VERSION
 
 __all__ = [
@@ -94,14 +85,9 @@ __all__ = [
     "MigrationIdMinter",
     "parse_individual_id",
     "Sink",
-    "NullSink",
     "CallbackSink",
-    "TextLineFileSink",
-    "JsonlFileSink",
-    "NetworkSink",
-    "MultiSink",
-    "iter_events",
-    "iter_raw",
+    "SinkStats",
+    "parse_records",
     "validate_log",
     "LogValidationError",
     "MigrationEdge",

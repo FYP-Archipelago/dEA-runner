@@ -16,11 +16,12 @@ from .events import (
     IslandStartEvent,
     MigrationArriveEvent,
     MigrationSendEvent,
+    RecordKind,
     RunEndEvent,
     RunStartEvent,
 )
 from .genome import EncodedGenome
-from .sinks import NullSink, Sink
+from .sinks import Sink
 from .version import SCHEMA_VERSION
 
 __all__ = ["EventLogger"]
@@ -33,14 +34,14 @@ class EventLogger:
         self,
         run_id: str,
         emitter: str,
-        sink: Sink | None = None,
+        sink: Sink,
         *,
         island_id: int | None = None,
         node_id: str | None = None,
     ) -> None:
         self.run_id = run_id
         self.emitter = emitter
-        self.sink: Sink = sink if sink is not None else NullSink()
+        self.sink = sink
         self.island_id = island_id
         self.node_id = node_id
 
@@ -66,11 +67,11 @@ class EventLogger:
         return dict(self._counts)
 
     def flush(self) -> None:
-        """Flush the underlying sinks."""
+        """Return once every record emitted so far has been delivered."""
         self.sink.flush()
 
     def close(self) -> None:
-        """Flush and close the underlying sinks."""
+        """Flush and close the sink."""
         self.sink.close()
 
     def __enter__(self) -> "EventLogger":
@@ -98,7 +99,7 @@ class EventLogger:
             type_name = getattr(event, "type", model.__name__)
             self._counts[type_name] = self._counts.get(type_name, 0) + 1
 
-            self.sink.write(event.to_json_line())
+            self.sink.write(event.to_json_line(), RecordKind.of(event.type))
 
         return event
 

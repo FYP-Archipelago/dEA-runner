@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -17,15 +18,32 @@ from archipelago_logging.version import HARNESS_VERSION, SCHEMA_VERSION
 __all__ = [
     "MigrationConfig",
     "LoggingConfig",
+    "BrokerConfig",
     "ExecutionConfig",
     "DockerConfig",
     "RunConfig",
     "load_config",
     "apply_overrides",
+    "redact_url",
     "ENV_PREFIX",
+    "BROKER_URL_ENV",
 ]
 
 ENV_PREFIX = "ARCHIPELAGO_"
+BROKER_URL_ENV = f"{ENV_PREFIX}BROKER__URL"
+
+
+def redact_url(url: str) -> str:
+    """The URL with any password replaced, so it can be logged."""
+    parts = urlsplit(url)
+    if parts.password is None:
+        return url
+    user = parts.username or ""
+    host = parts.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    port = f":{parts.port}" if parts.port is not None else ""
+    return urlunsplit(parts._replace(netloc=f"{user}:***@{host}{port}"))
 
 
 class _Base(BaseModel):
@@ -86,7 +104,7 @@ class MigrationConfig(_Base):
 
 
 class LoggingConfig(_Base):
-    """What gets logged, how much of it, and where it goes."""
+    """How genomes are logged, and where a run's other artefacts go."""
 
     output_dir: str = Field(default="runs", description="Parent directory; each run gets a subdirectory.")
     genome_mode: GenomeLogMode = Field(
@@ -99,11 +117,29 @@ class LoggingConfig(_Base):
         le=15,
         description="Rounding used to form the location signature of real-valued genomes. Hashes from runs with different precision are not comparable.",
     )
-    flush_interval_seconds: float = Field(default=2.0, ge=0.0)
-    network_queue_size: int = Field(
-        default=100_000,
-        ge=1000,
-        description="Per-island outbound log queue. On overflow, records are dropped and counted rather than back-pressuring the evolutionary loop.",
+
+
+class BrokerConfig(_Base):
+    """The Redis (or Valkey) server every record is appended to."""
+
+    url: str = Field(
+        default="redis://127.0.0.1:6379/0",
+        description="redis://[user:password@]host:port/db. The master and every island append to it directly; islands join the master's Docker networks, so the address the master uses works for them too. A password is redacted wherever the config is logged.",
+    )
+    connect_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0.0,
+        description="How long the master, and then each island, keeps trying to reach Redis at startup before the run fails.",
+    )
+    stall_seconds: float = Field(
+        default=120.0,
+        gt=0.0,
+        description="How long a writer keeps retrying with nothing acknowledged before the run fails. Records are never dropped, so a broker that stays unavailable fails the run instead.",
+    )
+    buffer_records: int = Field(
+        default=10_000,
+        ge=1,
+        description="Records an island holds while Redis catches up. When the buffer is full the island waits.",
     )
 
 
@@ -226,6 +262,7 @@ class RunConfig(_Base):
 
     migration: MigrationConfig = Field(default_factory=MigrationConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    broker: BrokerConfig = Field(default_factory=BrokerConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     docker: DockerConfig = Field(default_factory=DockerConfig)
 
@@ -391,6 +428,7 @@ class RunConfig(_Base):
     def resolved(self) -> dict[str, Any]:
         """JSON-safe dict of the fully resolved config, for ``run_start.config``."""
         payload = self.model_dump(mode="json")
+        payload["broker"]["url"] = redact_url(self.broker.url)
         payload["_meta"] = {
             "schema_version": SCHEMA_VERSION,
             "harness_version": HARNESS_VERSION,

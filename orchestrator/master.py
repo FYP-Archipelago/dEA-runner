@@ -1,4 +1,4 @@
-"""The master: spins up islands, brokers migration, aggregates logs, reports."""
+"""The master: spins up islands, brokers migration, writes its own records, reports."""
 
 from __future__ import annotations
 
@@ -11,19 +11,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from archipelago_logging import (
-    EventLogger,
-    JsonlFileSink,
-    Sink,
-    TerminationReason,
-    iso_now,
-    new_run_id,
-)
+from archipelago_logging import EventLogger, TerminationReason, iso_now, new_run_id
 from archipelago_logging.version import HARNESS_VERSION, SCHEMA_VERSION
 
 from .backends import DockerBackend, WorkerSpec
 from .config import RunConfig
 from .control_server import ControlServer
+from .redis_stream import BrokerError, RedisStreamWriter, ping_broker, stream_key, stream_length
 from .topology import build_topology, describe_topology
 
 __all__ = ["Master", "RunSummary", "run"]
@@ -35,7 +29,7 @@ class RunSummary:
 
     run_id: str
     output_dir: Path
-    aggregate_log: Path | None
+    stream_key: str
     termination_reason: str
     wallclock_seconds: float
     islands_completed: int
@@ -110,7 +104,7 @@ class Master:
             config.migration.topology, config.num_islands, **config.migration.topology_params
         )
 
-        self.aggregate_sink: Sink | None = None
+        self.writer: RedisStreamWriter | None = None
         self.logger: EventLogger | None = None
         self.server: ControlServer | None = None
         self.backend: DockerBackend | None = None
@@ -158,23 +152,28 @@ class Master:
                 f"run_id {self.run_id!r} has already been used: {self.output_dir} holds its "
                 "output, and this run would be appended to it. Choose a new run_id."
             )
+        broker = self.config.broker
+        stream = stream_key(self.run_id)
+        ping_broker(broker.url, broker.connect_timeout_seconds)
+        existing = stream_length(broker.url, stream)
+        if existing:
+            raise FileExistsError(
+                f"run_id {self.run_id!r} has already been used: {stream} holds {existing} entries, "
+                "and run_start must be the first. Choose a new run_id."
+            )
         self.output_dir.mkdir(parents=True, exist_ok=True)
         (self.output_dir / "islands").mkdir(parents=True, exist_ok=True)
         self.output_dir.chmod(0o777)
         (self.output_dir / "islands").chmod(0o777)
         config_path = self.config.write_resolved(self.output_dir / "resolved_config.yaml")
 
-        aggregate_path = self.output_dir / "run.jsonl"
-        self.aggregate_sink = JsonlFileSink(
-            aggregate_path,
-            flush_interval_seconds=self.config.logging.flush_interval_seconds,
+        self.writer = RedisStreamWriter(
+            broker.url,
+            stream,
+            buffer_records=broker.buffer_records,
+            stall_seconds=broker.stall_seconds,
         )
-
-        self.logger = EventLogger(
-            self.run_id,
-            "master",
-            self.aggregate_sink,
-        )
+        self.logger = EventLogger(self.run_id, "master", self.writer)
 
         termination = TerminationReason.COMPLETED.value
         island_results: list[dict[str, Any]] = []
@@ -185,7 +184,6 @@ class Master:
                 run_id=self.run_id,
                 topology=self.topology,
                 logger=self.logger,
-                aggregate_sink=self.aggregate_sink,
                 host=bind_host,
                 port=bind_port,
                 max_pending_per_island=self.config.migration.max_pending_per_island,
@@ -257,6 +255,7 @@ class Master:
                     output_dir=self.output_dir.resolve(),
                     control_host=advertise,
                     control_port=actual_port,
+                    broker_url=broker.url,
                 )
                 node_id = self.backend.launch(spec)
                 self._node_ids[island_id] = node_id
@@ -272,11 +271,11 @@ class Master:
 
         except Exception as exc:
             termination = TerminationReason.ERROR.value
-            if self.logger is not None:
+            if self.logger is not None and not isinstance(exc, BrokerError):
                 self.logger.diagnostic(f"run failed: {type(exc).__name__}: {exc}", level="error")
             raise
         finally:
-            summary = self._shutdown(started, termination, island_results, aggregate_path)
+            summary = self._shutdown(started, termination, island_results, stream)
 
         return summary
 
@@ -335,9 +334,9 @@ class Master:
         started: float,
         termination: str,
         island_results: list[dict[str, Any]],
-        aggregate_path: Path | None,
+        stream: str,
     ) -> RunSummary:
-        """Emit ``run_end``, stop the server and the backend, close the sinks."""
+        """Emit ``run_end`` and flush it, then stop the server and remove the containers."""
         elapsed = time.monotonic() - started
 
         completed = sum(
@@ -394,37 +393,38 @@ class Master:
                     "algorithm_summary": result.get("algorithm_summary"),
                 }
 
-        if self.logger is not None and self.server is not None:
-            self._warn_if_no_island_ever_connected()
-            self.logger.run_end(
-                ended_at=iso_now(),
-                termination_reason=termination,
-                wallclock_seconds=elapsed,
-                islands_completed=completed,
-                islands_failed=failed,
-                total_evaluations=total_evaluations,
-                total_migration_events=self.server.total_migration_events,
-                total_migrants=self.server.total_migrants,
-                global_best_fitness=best_fitness,
-                global_best_island=best_island,
-                global_best_genome_hash=best_hash,
-                global_best_genome=best_genome,
-                per_island=per_island,
-            )
-
-        if self.backend is not None:
-            self.backend.stop_all(self.config.execution.shutdown_grace_seconds)
-        if self.server is not None:
-            self.server.stop()
-        if self.backend is not None:
-            self.backend.cleanup()
-        if self.aggregate_sink is not None:
-            self.aggregate_sink.close()
+        try:
+            if self.logger is not None and self.server is not None:
+                self._warn_if_no_island_ever_connected()
+                self.logger.run_end(
+                    ended_at=iso_now(),
+                    termination_reason=termination,
+                    wallclock_seconds=elapsed,
+                    islands_completed=completed,
+                    islands_failed=failed,
+                    total_evaluations=total_evaluations,
+                    total_migration_events=self.server.total_migration_events,
+                    total_migrants=self.server.total_migrants,
+                    global_best_fitness=best_fitness,
+                    global_best_island=best_island,
+                    global_best_genome_hash=best_hash,
+                    global_best_genome=best_genome,
+                    per_island=per_island,
+                )
+            if self.writer is not None:
+                self.writer.close()
+        finally:
+            if self.backend is not None:
+                self.backend.stop_all(self.config.execution.shutdown_grace_seconds)
+            if self.server is not None:
+                self.server.stop()
+            if self.backend is not None:
+                self.backend.cleanup()
 
         summary = RunSummary(
             run_id=self.run_id,
             output_dir=self.output_dir,
-            aggregate_log=aggregate_path,
+            stream_key=stream,
             termination_reason=termination,
             wallclock_seconds=elapsed,
             islands_completed=completed,

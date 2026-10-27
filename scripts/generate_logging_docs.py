@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Regenerate the field reference and worked examples in ``docs/LOGGING_FORMAT.md``.
 
-The examples come from a real run, so regenerating them needs Docker and a worker
-image built from the current source; ``--fields-only`` and ``--check`` need neither.
+The examples come from a real run, so regenerating them needs Docker, a worker image built
+from the current source, and a Redis the islands can reach; ``--fields-only`` and ``--check``
+need none of them.
 """
 
 from __future__ import annotations
@@ -111,14 +112,14 @@ def build_field_reference() -> str:
     return "\n".join(parts)
 
 
-def _example_records(image: str) -> dict[str, list[dict[str, Any]]]:
+def _example_records(image: str, broker_url: str) -> dict[str, list[dict[str, Any]]]:
     """Capture one real record of each type by running a tiny archipelago."""
     import shutil
     import tempfile
 
-    from archipelago_logging import iter_raw
     from orchestrator.config import RunConfig
     from orchestrator.master import Master
+    from orchestrator.redis_stream import read_stream
 
     workspace = Path(tempfile.mkdtemp(prefix="archipelago-docs-"))
     try:
@@ -140,11 +141,12 @@ def _example_records(image: str) -> dict[str, list[dict[str, Any]]]:
             },
             logging={"output_dir": str(workspace)},
             docker={"image": image, "build": False},
+            broker={"url": broker_url},
         )
         summary = Master(config, repository_root=REPOSITORY_ROOT).run()
 
         examples: dict[str, list[dict[str, Any]]] = {}
-        for record in iter_raw(summary.aggregate_log):
+        for record in read_stream(broker_url, summary.stream_key):
             examples.setdefault(record["type"], []).append(record)
 
         evaluations = examples.get("evaluation", [])
@@ -210,13 +212,13 @@ def _replace_region(text: str, begin: str, end: str, replacement: str) -> str:
     return pattern.sub(f"{begin}\n{replacement}\n{end}", text)
 
 
-def render(current: str, image: str) -> str:
+def render(current: str, image: str, broker_url: str) -> str:
     """Replace both generated regions in the document."""
     updated = _replace_region(
         current, FIELD_REFERENCE_BEGIN, FIELD_REFERENCE_END, build_field_reference()
     )
     updated = _replace_region(
-        updated, EXAMPLES_BEGIN, EXAMPLES_END, build_examples(_example_records(image))
+        updated, EXAMPLES_BEGIN, EXAMPLES_END, build_examples(_example_records(image, broker_url))
     )
     return updated
 
@@ -239,6 +241,11 @@ def main() -> int:
         "--image",
         default="archipelago-worker:latest",
         help="Worker image for the example run. It must already exist and be current.",
+    )
+    parser.add_argument(
+        "--broker-url",
+        default="redis://127.0.0.1:6379/0",
+        help="Redis for the example run; the islands use host networking, so a local one works.",
     )
     args = parser.parse_args()
 
@@ -264,7 +271,7 @@ def main() -> int:
             current, FIELD_REFERENCE_BEGIN, FIELD_REFERENCE_END, build_field_reference()
         )
     else:
-        updated = render(current, args.image)
+        updated = render(current, args.image, args.broker_url)
     DOCUMENT.write_text(updated, encoding="utf-8")
     print(f"Regenerated {DOCUMENT} for schema {SCHEMA_VERSION}.")
     return 0

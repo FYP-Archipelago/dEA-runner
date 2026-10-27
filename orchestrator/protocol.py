@@ -9,7 +9,6 @@ from typing import Any, Iterator
 __all__ = [
     "PROTOCOL_VERSION",
     "Op",
-    "Role",
     "encode",
     "send_message",
     "recv_message",
@@ -22,13 +21,6 @@ PROTOCOL_VERSION = "1.0"
 
 class ProtocolError(RuntimeError):
     """Raised on a malformed or truncated control message."""
-
-
-class Role:
-    """Connection roles, declared in a connection's first line."""
-
-    CONTROL = "control"
-    LOG = "log"
 
 
 class Op:

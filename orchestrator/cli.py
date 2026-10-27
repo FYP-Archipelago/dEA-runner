@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from .config import load_config
+from .config import load_config, redact_url
 
 __all__ = ["main"]
 
@@ -63,6 +63,7 @@ def _print_plan(config) -> None:
           f"  x{config.migration.num_migrants} ({config.migration.selection} -> "
           f"{config.migration.replacement}, fanout={config.migration.fanout})")
     print(f"  worker image   {config.docker.image}")
+    print(f"  broker         {redact_url(config.broker.url)}")
 
 
 def _command_validate(args: argparse.Namespace) -> int:
@@ -85,7 +86,7 @@ def _command_run(args: argparse.Namespace) -> int:
     print(f"\nRun {summary.run_id} finished: {summary.termination_reason} "
           f"in {summary.wallclock_seconds:.1f}s")
     print(f"  output           {summary.output_dir}")
-    print(f"  events           {summary.aggregate_log}")
+    print(f"  records          {summary.stream_key}")
     print(f"  islands          {summary.islands_completed} completed, {summary.islands_failed} failed")
     print(f"  evaluations      {summary.total_evaluations:,} "
           f"({100.0 * summary.total_evaluations / max(1, config.evaluation_budget):.1f}% of budget)")
@@ -101,14 +102,16 @@ def _command_run(args: argparse.Namespace) -> int:
 
 
 def _command_verify_log(args: argparse.Namespace) -> int:
-    from archipelago_logging.reader import LogValidationError, iter_raw, validate_log
+    from archipelago_logging import LogValidationError, validate_log
 
+    from .redis_stream import read_stream, stream_key
+
+    url = args.url or load_config().broker.url
+    key = stream_key(args.run_id)
     try:
-        report = validate_log(
-            iter_raw(args.path, strict=True), require_run_end=not args.allow_incomplete
-        )
+        report = validate_log(read_stream(url, key), require_run_end=not args.allow_incomplete)
     except LogValidationError as exc:
-        print(f"INVALID: {args.path}: {exc}", file=sys.stderr)
+        print(f"INVALID: {key}: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(report, indent=2))
     return 0
@@ -139,10 +142,15 @@ def main(argv: list[str] | None = None) -> int:
 
     verify_parser = subparsers.add_parser(
         "verify-log",
-        help="Check a run's log against the schema's structural invariants, including "
-        "that every emitter's records arrived in seq order.",
+        help="Check a run's records in Redis against the schema's structural invariants, "
+        "including that every emitter's records arrived in seq order.",
     )
-    verify_parser.add_argument("path", help="Path to a run's .jsonl file.")
+    verify_parser.add_argument("run_id", help="The run whose stream to check.")
+    verify_parser.add_argument(
+        "--url",
+        default=None,
+        help="Redis URL. Defaults to broker.url, which ARCHIPELAGO_BROKER__URL overrides.",
+    )
     verify_parser.add_argument(
         "--allow-incomplete",
         action="store_true",

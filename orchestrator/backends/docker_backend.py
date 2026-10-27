@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..config import BROKER_URL_ENV
+
 __all__ = [
     "DockerBackend",
     "DockerUnavailable",
@@ -29,6 +31,7 @@ class WorkerSpec:
     output_dir: Path
     control_host: str
     control_port: int
+    broker_url: str
 
 
 @dataclass
@@ -105,6 +108,7 @@ class DockerBackend:
         self._created_network: Any | None = None
         self.master_alias: str | None = None
         self._master_container: Any | None = None
+        self._master_networks: list[str] = []
         self.build_warning: str | None = None
 
 
@@ -180,10 +184,13 @@ class DockerBackend:
     MASTER_ALIAS = "archipelago-master"
 
     def _ensure_network(self) -> None:
-        """Decide where the islands live, so that they can reach the master."""
+        """Decide where the islands live, so that they can reach the master and Redis."""
         master = self._own_container()
 
         if master is not None:
+            # Islands also join every network the master is on, so they reach Redis at the
+            # address the master uses.
+            self._master_networks = sorted(master.attrs["NetworkSettings"]["Networks"])
             self._created_network = self.client.networks.create(
                 self.network_name, driver="bridge", labels=self.labels
             )
@@ -303,15 +310,16 @@ class DockerBackend:
             "PYTHONUNBUFFERED": "1",
             "IN_ARCHIPELAGO_CONTAINER": "1",
             "ISLAND_CONTAINER_NAME": container_name,
+            # The resolved config on disk carries a redacted URL; the real one travels here.
+            BROKER_URL_ENV: spec.broker_url,
         }
 
         output_dir.mkdir(parents=True, exist_ok=True)
         volumes = {self._host_mount_source(output_dir): {"bind": str(output_dir), "mode": "rw"}}
 
-        container = self.client.containers.run(
+        container = self.client.containers.create(
             self.image,
             command=command,
-            detach=True,
             name=container_name,
             labels={**self.labels, "archipelago.island_id": str(spec.island_id)},
             environment=environment,
@@ -327,6 +335,9 @@ class DockerBackend:
             working_dir="/archipelago",
         )
         self._containers[spec.island_id] = container
+        for network in self._master_networks:
+            self.client.networks.get(network).connect(container)
+        container.start()
         self._node_ids[spec.island_id] = container_name
         return container_name
 
@@ -389,6 +400,7 @@ class DockerBackend:
             "memory": self.memory,
             "network": self.worker_network,
             "network_created_for_this_run": self._created_network is not None,
+            "master_networks": self._master_networks,
             "master_in_container": self.master_alias is not None,
             "labels": self.labels,
             "build_warning": self.build_warning,

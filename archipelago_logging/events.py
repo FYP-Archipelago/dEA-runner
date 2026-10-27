@@ -249,7 +249,7 @@ class IslandEndEvent(IslandEvent):
     )
     control_channel: dict[str, Any] = Field(
         default_factory=dict,
-        description="Control-plane health for this island: failed calls, log records dropped by the network sink, last transport error.",
+        description="Transport health for this island: failed control calls and the last control error, and under `broker` the records Redis had acknowledged before this one, the errors its writer retried past, and the last of them.",
     )
 
 

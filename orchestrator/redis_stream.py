@@ -1,4 +1,4 @@
-"""Append one emitter's log records to the run's Redis stream, in order, dropping none.
+"""A run's Redis stream: the writer that appends to it, the reader, and a reachability check.
 
 Each emitter (every island, and the master) has its own writer: one connection, one pump
 thread. The producer hands records to a bounded buffer; the pump drains it in batches, each
@@ -25,9 +25,11 @@ knowing whether the first attempt was applied.
 
 from __future__ import annotations
 
+import json
 import queue
 import threading
 import time
+from typing import Any, Iterator
 
 import redis
 from redis.backoff import NoBackoff
@@ -43,10 +45,18 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 from redis.retry import Retry
 
-from archipelago_logging import RecordKind
-from archipelago_logging.sinks import SinkStats
+from archipelago_logging import LogValidationError, RecordKind, Sink
 
-__all__ = ["BATCH_RECORDS", "BATCH_SECONDS", "BrokerError", "RedisStreamWriter", "stream_key"]
+__all__ = [
+    "BATCH_RECORDS",
+    "BATCH_SECONDS",
+    "BrokerError",
+    "RedisStreamWriter",
+    "ping_broker",
+    "read_stream",
+    "stream_key",
+    "stream_length",
+]
 
 BATCH_RECORDS = 200
 BATCH_SECONDS = 0.15
@@ -94,7 +104,71 @@ class _Barrier:
         self.reached = threading.Event()
 
 
-class RedisStreamWriter:
+def ping_broker(url: str, timeout: float) -> None:
+    """Return once Redis at ``url`` answers; raise :class:`BrokerError` after ``timeout`` seconds."""
+    client = redis.Redis.from_url(
+        url, socket_timeout=timeout, socket_connect_timeout=timeout, retry=Retry(NoBackoff(), 0)
+    )
+    gives_up_at = time.monotonic() + timeout
+    backoff = _FIRST_BACKOFF_SECONDS
+    try:
+        while True:
+            try:
+                client.ping()
+                return
+            except (AuthenticationError, AuthorizationError) as exc:
+                raise BrokerError(f"Redis refused the runner's credentials: {exc}") from exc
+            except (RedisConnectionError, RedisTimeoutError) as exc:
+                now = time.monotonic()
+                if now >= gives_up_at:
+                    raise BrokerError(f"cannot reach Redis within {timeout:g} s: {exc}") from exc
+                time.sleep(min(backoff, gives_up_at - now))
+                backoff = min(backoff * 2, _MAX_BACKOFF_SECONDS)
+            except ResponseError as exc:
+                raise BrokerError(f"Redis refused the runner: {exc}") from exc
+    finally:
+        client.close()
+
+
+def stream_length(url: str, key: str) -> int:
+    """How many entries a stream holds; 0 when it does not exist."""
+    client = redis.Redis.from_url(url)
+    try:
+        return int(client.xlen(key))
+    except ResponseError as exc:
+        raise BrokerError(f"cannot read {key}: {exc}") from exc
+    finally:
+        client.close()
+
+
+def read_stream(url: str, key: str) -> Iterator[dict[str, Any]]:
+    """Yield the records in a stream, oldest first, checking each entry's shape on the way."""
+    client = redis.Redis.from_url(url, decode_responses=True)
+    try:
+        start = "-"
+        while True:
+            entries = client.xrange(key, start, "+", count=_SEARCH_CHUNK)
+            for entry_id, fields in entries:
+                if set(fields) != {"kind", "data"}:
+                    raise LogValidationError(
+                        f"entry {entry_id}: fields {sorted(fields)}, expected kind and data"
+                    )
+                record = json.loads(fields["data"])
+                expected = RecordKind.of(record.get("type", "")).value
+                if fields["kind"] != expected:
+                    raise LogValidationError(
+                        f"entry {entry_id}: kind {fields['kind']!r} on a {record.get('type')!r} "
+                        f"record, expected {expected!r}"
+                    )
+                yield record
+            if len(entries) < _SEARCH_CHUNK:
+                return
+            start = f"({entries[-1][0]}"
+    finally:
+        client.close()
+
+
+class RedisStreamWriter(Sink):
     """Appends one emitter's records to a Redis stream, exactly once, in the order written."""
 
     def __init__(
@@ -108,8 +182,8 @@ class RedisStreamWriter:
         batch_records: int = BATCH_RECORDS,
         batch_seconds: float = BATCH_SECONDS,
     ) -> None:
+        super().__init__()
         self.key = key
-        self.stats = SinkStats()
         self._stall_seconds = stall_seconds
         self._batch_records = batch_records
         self._batch_seconds = batch_seconds

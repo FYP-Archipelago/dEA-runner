@@ -1,4 +1,4 @@
-"""Master-side control server: migration broker and log collector."""
+"""Master-side control server: the migration broker."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
-from archipelago_logging import EventLogger, MigrationIdMinter, Sink, wall_now
+from archipelago_logging import EventLogger, MigrationIdMinter, wall_now
 
-from .protocol import Op, ProtocolError, Role, iter_messages, recv_message, send_message
+from .protocol import Op, ProtocolError, iter_messages, recv_message, send_message
 from .seeding import seed_for_broker
 from .topology import Topology
 
@@ -60,7 +60,6 @@ class ControlServer:
         run_id: str,
         topology: Topology,
         logger: EventLogger,
-        aggregate_sink: Sink | None,
         host: str = "127.0.0.1",
         port: int = 0,
         max_pending_per_island: int = 1000,
@@ -71,7 +70,6 @@ class ControlServer:
         self.run_id = run_id
         self.topology = topology
         self.logger = logger
-        self.aggregate_sink = aggregate_sink
         self.max_pending = max_pending_per_island
         self.fanout = fanout
         self.evaluation_budget = evaluation_budget
@@ -112,23 +110,18 @@ class ControlServer:
         outer = self
 
         class Handler(socketserver.StreamRequestHandler):
-            """Dispatches one connection by the role in its first line."""
+            """Serves one island's control connection, introduced by its first line."""
 
             timeout = None
             disable_nagle_algorithm = True
 
             def handle(self) -> None:
-                """Read the handshake and route to the matching handler."""
+                """Read the island's introduction, then serve its requests."""
                 try:
                     hello = recv_message(self.rfile)
                 except (ProtocolError, OSError):
                     return
-                role = hello.get("role")
-                island_id = hello.get("island_id")
-                if role == Role.CONTROL:
-                    outer._handle_control(self, int(island_id), hello)
-                elif role == Role.LOG:
-                    outer._handle_log_stream(self, island_id, outer.aggregate_sink)
+                outer._handle_control(self, int(hello["island_id"]), hello)
 
         class Server(socketserver.ThreadingTCPServer):
             """Threaded TCP server, one thread per island connection."""
@@ -153,23 +146,6 @@ class ControlServer:
         if self._server_thread is not None:
             self._server_thread.join(timeout=timeout)
 
-
-    def _handle_log_stream(
-        self,
-        handler: socketserver.StreamRequestHandler,
-        island_id: Any,
-        sink: Sink | None,
-    ) -> None:
-        """Append an island's streamed lines to the aggregate the handshake selected."""
-        try:
-            for raw in handler.rfile:
-                line = raw.decode("utf-8", errors="replace").strip()
-                if not line:
-                    continue
-                if sink is not None:
-                    sink.write(line)
-        except OSError:
-            return
 
     def _handle_control(
         self, handler: socketserver.StreamRequestHandler, island_id: int, hello: dict[str, Any]

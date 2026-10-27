@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from .events import (
@@ -17,9 +15,7 @@ from .events import (
 from .version import SCHEMA_VERSION
 
 __all__ = [
-    "iter_lines",
-    "iter_raw",
-    "iter_events",
+    "parse_records",
     "LogValidationError",
     "validate_log",
     "MigrationEdge",
@@ -28,42 +24,18 @@ __all__ = [
 
 
 class LogValidationError(Exception):
-    """Raised by :func:`validate_log` when a log violates the schema contract."""
+    """Raised when a log violates the schema contract."""
 
 
-def iter_lines(path: str | Path) -> Iterator[str]:
-    """Yield non-empty lines from a JSON Lines log."""
-    with open(path, "r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if line:
-                yield line
-
-
-def iter_raw(path: str | Path, *, strict: bool = False) -> Iterator[dict[str, Any]]:
-    """Yield decoded JSON objects in file order, without model validation.
-
-    A line that does not decode is skipped, or raises when ``strict``.
-    """
-    for number, line in enumerate(iter_lines(path), start=1):
-        try:
-            yield json.loads(line)
-        except json.JSONDecodeError as exc:
-            if strict:
-                raise LogValidationError(f"{path}:{number}: undecodable JSON: {exc}") from exc
-
-
-def iter_events(path: str | Path, *, strict: bool = False) -> Iterator[BaseEvent]:
-    """Yield validated event models from a run's JSON Lines log, in file order."""
-    for number, record in enumerate(iter_raw(path, strict=strict), start=1):
+def parse_records(records: Iterable[dict[str, Any]]) -> Iterator[BaseEvent]:
+    """Validate decoded records into event models, in the order given."""
+    for number, record in enumerate(records, start=1):
         version = record.get("schema_version", "")
         if version != SCHEMA_VERSION:
-            if strict:
-                raise LogValidationError(
-                    f"{path}: record {number}: schema_version {version!r}; this reader reads "
-                    f"{SCHEMA_VERSION} only"
-                )
-            continue
+            raise LogValidationError(
+                f"record {number}: schema_version {version!r}; this reader reads "
+                f"{SCHEMA_VERSION} only"
+            )
         yield parse_event(record)
 
 

@@ -17,10 +17,6 @@ from archipelago_logging import (
     EventLogger,
     GenomePolicy,
     IndividualIdMinter,
-    JsonlFileSink,
-    MultiSink,
-    NetworkSink,
-    Sink,
     TerminationReason,
     wall_now,
 )
@@ -29,11 +25,11 @@ from benchmarks.registry import create_problem
 from .config import RunConfig
 from .control_client import ControlClient
 from .migration import choose_replacements, select_migrants
-from .protocol import Role
+from .redis_stream import BrokerError, RedisStreamWriter, ping_broker, stream_key
 from .seeding import seed_for_island
 from .topology import build_topology
 
-__all__ = ["IslandRunner", "IslandResult", "build_island_sinks", "resolve_node_id"]
+__all__ = ["IslandRunner", "IslandResult", "resolve_node_id"]
 
 
 @dataclass
@@ -70,39 +66,6 @@ def resolve_node_id(island_id: int) -> str:
     return f"{hostname}:{os.getpid()}"
 
 
-def build_island_sinks(
-    config: RunConfig,
-    run_id: str,
-    island_id: int,
-    output_dir: Path,
-    control_address: tuple[str, int] | None,
-) -> Sink:
-    """Build this island's sink: its own shard file, and one ordered stream to the master.
-
-    Every record, evaluation or event, goes through this one sink, so the order the
-    logger assigns ``seq`` in is the order the records travel in.
-    """
-    import json
-
-    components: list[Sink] = [
-        JsonlFileSink(
-            output_dir / "islands" / f"island-{island_id:02d}.jsonl",
-            flush_interval_seconds=config.logging.flush_interval_seconds,
-        )
-    ]
-    if control_address is not None:
-        handshake = json.dumps({"role": Role.LOG, "run_id": run_id, "island_id": island_id}) + "\n"
-        components.append(
-            NetworkSink(
-                control_address[0],
-                control_address[1],
-                queue_size=config.logging.network_queue_size,
-                handshake=handshake,
-            )
-        )
-    return MultiSink(components)
-
-
 class IslandRunner:
     """Runs one island to completion."""
 
@@ -128,12 +91,16 @@ class IslandRunner:
             container_id = os.environ.get("ISLAND_CONTAINER_NAME") or socket.gethostname()
         self.container_id = container_id
 
-        self.sink = build_island_sinks(config, run_id, island_id, self.output_dir, control_address)
-
+        self.writer = RedisStreamWriter(
+            config.broker.url,
+            stream_key(run_id),
+            buffer_records=config.broker.buffer_records,
+            stall_seconds=config.broker.stall_seconds,
+        )
         self.logger = EventLogger(
             run_id,
             f"island:{island_id}",
-            self.sink,
+            self.writer,
             island_id=island_id,
             node_id=self.node_id,
         )
@@ -234,6 +201,11 @@ class IslandRunner:
             self.control.bye(generation=self.ctx.generation, evaluations=self.ctx.evaluations)
             self.control.close()
         self.logger.close()
+
+    def _abandon(self) -> None:
+        """Leave without a word: with Redis unreachable, nothing more can be logged."""
+        if self.control is not None:
+            self.control.close()
 
 
     def _migration_active(self) -> bool:
@@ -484,6 +456,7 @@ class IslandRunner:
         deadline = started + limit if limit is not None else None
 
         try:
+            ping_broker(self.config.broker.url, self.config.broker.connect_timeout_seconds)
             self._start_island()
             self.ctx.generation = 0
             population = self.algorithm.initialize(self.population_size)
@@ -555,6 +528,9 @@ class IslandRunner:
             else:
                 termination = TerminationReason.MAX_GENERATIONS.value
 
+        except BrokerError:
+            self._abandon()
+            raise
         except Exception as exc:
             termination = TerminationReason.ERROR.value
             error = f"{type(exc).__name__}: {exc}"
@@ -573,9 +549,11 @@ class IslandRunner:
             "control_available": bool(self.control and self.control.available),
             "failed_control_calls": self.control.failed_calls if self.control else 0,
             "last_control_error": self.control.last_error if self.control else None,
-            "sink_stats": (
-                self.sink.describe() if isinstance(self.sink, MultiSink) else {}
-            ),
+        }
+        broker = {
+            "acknowledged": self.writer.stats.written,
+            "errors": self.writer.stats.errors,
+            "last_error": self.writer.stats.last_error,
         }
 
         elapsed = time.monotonic() - started
@@ -595,7 +573,7 @@ class IslandRunner:
             wallclock_seconds=elapsed,
             generations_since_improvement=self._generations_since_improvement,
             algorithm_summary=summary,
-            control_channel=control_channel,
+            control_channel={**control_channel, "broker": broker},
         )
         self._finish()
 
