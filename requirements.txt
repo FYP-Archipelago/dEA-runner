@@ -7,5 +7,6 @@
 numpy>=2.0            # vectorised operators and RNG streams
 pydantic>=2.7         # event schema and run-config validation
 PyYAML>=6.0           # run configuration files
+redis>=5.0            # appends log records to the run's Redis stream
 docker>=7.0           # master only: programmatic container lifecycle
 pytest>=8.0           # development and CI

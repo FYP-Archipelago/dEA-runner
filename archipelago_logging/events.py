@@ -11,6 +11,7 @@ from .version import SCHEMA_VERSION
 
 __all__ = [
     "EventType",
+    "RecordKind",
     "Operator",
     "TerminationReason",
     "DiagnosticLevel",
@@ -41,6 +42,18 @@ class EventType(str, Enum):
     ISLAND_END = "island_end"
     RUN_END = "run_end"
     DIAGNOSTIC = "diagnostic"
+
+
+class RecordKind(str, Enum):
+    """The ``kind`` field of a stream entry, so a consumer can route without decoding ``data``."""
+
+    ROW = "row"
+    EVENT = "event"
+
+    @classmethod
+    def of(cls, event_type: str) -> "RecordKind":
+        """``row`` for an evaluation record, ``event`` for every other type."""
+        return cls.ROW if event_type == EventType.EVALUATION.value else cls.EVENT
 
 
 class Operator(str, Enum):
