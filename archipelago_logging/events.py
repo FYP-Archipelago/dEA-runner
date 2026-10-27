@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import csv
-import io
-import json
 from enum import Enum
 from typing import Annotated, Any, Literal, Union
 
@@ -30,12 +27,6 @@ __all__ = [
     "AnyEvent",
     "EVENT_MODELS",
     "parse_event",
-    "EVALUATION_CSV_COLUMNS",
-    "EVALUATION_CSV_HEADER",
-    "PARENT_ID_SEPARATOR",
-    "evaluation_csv_schema",
-    "format_evaluation_csv_row",
-    "evaluation_from_csv_row",
 ]
 
 class EventType(str, Enum):
@@ -91,7 +82,11 @@ class DiagnosticLevel(str, Enum):
 class BaseEvent(BaseModel):
     """Fields present on every record in the stream."""
 
-    model_config = ConfigDict(extra="forbid", use_enum_values=True, validate_assignment=False)
+    # JSON has no inf or NaN: Pydantic would write them as null, leaving a record no reader
+    # accepts. Rejecting them here fails the write that produced one, loudly.
+    model_config = ConfigDict(
+        extra="forbid", use_enum_values=True, validate_assignment=False, allow_inf_nan=False
+    )
 
     schema_version: str = Field(
         default=SCHEMA_VERSION,
@@ -464,172 +459,3 @@ _ADAPTER: TypeAdapter[Any] = TypeAdapter(AnyEvent)
 def parse_event(record: dict[str, Any]) -> BaseEvent:
     """Validate one decoded JSON object into its typed event model."""
     return _ADAPTER.validate_python(record)
-
-
-PARENT_ID_SEPARATOR = ";"
-
-EVALUATION_CSV_COLUMNS: tuple[str, ...] = (
-    "run_id",
-    "island_id",
-    "seq",
-    "eval_index",
-    "generation",
-    "t_wall",
-    "t_mono_ns",
-    "individual_id",
-    "parent_ids",
-    "operator",
-    "fitness",
-    "objective",
-    "feasible",
-    "constraint_violation",
-    "is_island_best",
-    "genome_encoding",
-    "genome_hash",
-    "genome_repr",
-    "genome_repr_mode",
-    "genome_precision_decimals",
-    "genome_dim",
-    "origin_island",
-    "origin_individual_id",
-)
-
-EVALUATION_CSV_HEADER = ",".join(EVALUATION_CSV_COLUMNS)
-
-
-def evaluation_csv_schema() -> dict[str, Any]:
-    """Sidecar describing ``evaluations.csv``, written once."""
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "record_type": EventType.EVALUATION.value,
-        "columns": list(EVALUATION_CSV_COLUMNS),
-        "conventions": {
-            "null": "empty field",
-            "boolean": "1 for true, 0 for false, empty for unknown",
-            "parent_ids": f"{PARENT_ID_SEPARATOR!r}-separated list; empty for an initial individual",
-            "genome_repr": (
-                "interpretation depends on genome_repr_mode: a base64 string for 'compact' "
-                "(see archipelago_logging.decode_compact), JSON for 'full'. Composite "
-                "encodings (real_vector_velocity, real_vector_sigma) are JSON objects in "
-                "both modes."
-            ),
-            "quoting": "RFC 4180 (csv.QUOTE_MINIMAL); read with Python's csv module or pandas",
-        },
-        "note": (
-            "Every other event type for this run is in run.jsonl. Join on run_id, "
-            "island_id and generation."
-        ),
-    }
-
-
-def _csv_scalar(value: Any) -> str:
-    """Render one field. ``None`` becomes an empty string; booleans become 1/0."""
-    if value is None:
-        return ""
-    if isinstance(value, bool):
-        return "1" if value else "0"
-    return str(value)
-
-
-def _csv_genome_repr(value: Any) -> str:
-    """Render ``genome_repr``, which is a string, a JSON structure, or absent."""
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    return json.dumps(value, separators=(",", ":"))
-
-
-def format_evaluation_csv_row(event: "EvaluationEvent") -> str:
-    """Serialise one evaluation to a single RFC 4180 CSV line (no trailing newline)."""
-    values = {
-        "run_id": event.run_id,
-        "island_id": event.island_id,
-        "seq": event.seq,
-        "eval_index": event.eval_index,
-        "generation": event.generation,
-        "t_wall": f"{event.t_wall:.6f}",
-        "t_mono_ns": event.t_mono_ns,
-        "individual_id": event.individual_id,
-        "parent_ids": PARENT_ID_SEPARATOR.join(event.parent_ids or ()),
-        "operator": event.operator,
-        "fitness": repr(float(event.fitness)),
-        "objective": "" if event.objective is None else repr(float(event.objective)),
-        "feasible": event.feasible,
-        "constraint_violation": event.constraint_violation,
-        "is_island_best": event.is_island_best,
-        "genome_encoding": event.genome_encoding,
-        "genome_hash": event.genome_hash,
-        "genome_repr": _csv_genome_repr(event.genome_repr),
-        "genome_repr_mode": event.genome_repr_mode,
-        "genome_precision_decimals": event.genome_precision_decimals,
-        "genome_dim": event.genome_dim,
-        "origin_island": event.origin_island,
-        "origin_individual_id": event.origin_individual_id,
-    }
-    buffer = io.StringIO()
-    writer = csv.writer(buffer, lineterminator="")
-    writer.writerow(
-        [
-            values[column] if column == "genome_repr" else _csv_scalar(values[column])
-            for column in EVALUATION_CSV_COLUMNS
-        ]
-    )
-    return buffer.getvalue()
-
-
-def _csv_int(text: str) -> int | None:
-    return int(text) if text != "" else None
-
-
-def _csv_float(text: str) -> float | None:
-    return float(text) if text != "" else None
-
-
-def _csv_bool(text: str) -> bool | None:
-    return None if text == "" else text == "1"
-
-
-def evaluation_from_csv_row(row: dict[str, str]) -> EvaluationEvent:
-    """Rebuild an :class:`EvaluationEvent` from one parsed CSV row."""
-    representation: Any = row.get("genome_repr") or None
-    mode = row["genome_repr_mode"]
-    if representation is not None and mode != "compact":
-        try:
-            representation = json.loads(representation)
-        except (json.JSONDecodeError, TypeError):
-            pass
-    elif representation is not None and representation.startswith("{"):
-        try:
-            representation = json.loads(representation)
-        except json.JSONDecodeError:
-            pass
-
-    parents = row.get("parent_ids") or ""
-    return EvaluationEvent(
-        schema_version=SCHEMA_VERSION,
-        run_id=row["run_id"],
-        emitter=f"island:{row['island_id']}",
-        seq=int(row["seq"]),
-        t_wall=float(row["t_wall"]),
-        t_mono_ns=int(row["t_mono_ns"]),
-        island_id=_csv_int(row.get("island_id", "")),
-        generation=_csv_int(row.get("generation", "")),
-        individual_id=row["individual_id"],
-        parent_ids=[part for part in parents.split(PARENT_ID_SEPARATOR) if part],
-        operator=row["operator"],
-        fitness=float(row["fitness"]),
-        objective=_csv_float(row.get("objective", "")),
-        feasible=_csv_bool(row.get("feasible", "")),
-        constraint_violation=_csv_float(row.get("constraint_violation", "")),
-        is_island_best=_csv_bool(row.get("is_island_best", "")),
-        eval_index=int(row["eval_index"]),
-        genome_encoding=row["genome_encoding"],
-        genome_hash=row["genome_hash"],
-        genome_repr=representation,
-        genome_repr_mode=mode,
-        genome_precision_decimals=_csv_int(row.get("genome_precision_decimals", "")),
-        genome_dim=_csv_int(row.get("genome_dim", "")),
-        origin_island=_csv_int(row.get("origin_island", "")),
-        origin_individual_id=row.get("origin_individual_id") or None,
-    )

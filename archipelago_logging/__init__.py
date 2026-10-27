@@ -2,9 +2,6 @@
 
 from .clock import ClockOffset, iso_now, measure_clock_offset, mono_ns, wall_now
 from .events import (
-    EVALUATION_CSV_COLUMNS,
-    EVALUATION_CSV_HEADER,
-    PARENT_ID_SEPARATOR,
     AnyEvent,
     BaseEvent,
     DiagnosticEvent,
@@ -20,9 +17,6 @@ from .events import (
     RunEndEvent,
     RunStartEvent,
     TerminationReason,
-    evaluation_csv_schema,
-    evaluation_from_csv_row,
-    format_evaluation_csv_row,
     parse_event,
 )
 from .genome import (
@@ -47,9 +41,6 @@ from .logger import EventLogger
 from .reader import (
     LogValidationError,
     MigrationEdge,
-    companion_evaluations_path,
-    iter_evaluation_rows,
-    iter_evaluations,
     iter_events,
     iter_raw,
     join_migration_edges,
@@ -57,7 +48,6 @@ from .reader import (
 )
 from .sinks import (
     CallbackSink,
-    CsvFileSink,
     JsonlFileSink,
     MultiSink,
     NetworkSink,
@@ -87,12 +77,6 @@ __all__ = [
     "RunEndEvent",
     "DiagnosticEvent",
     "parse_event",
-    "EVALUATION_CSV_COLUMNS",
-    "EVALUATION_CSV_HEADER",
-    "PARENT_ID_SEPARATOR",
-    "evaluation_csv_schema",
-    "format_evaluation_csv_row",
-    "evaluation_from_csv_row",
     "GenomeEncoding",
     "GenomeLogMode",
     "GenomePolicy",
@@ -112,13 +96,9 @@ __all__ = [
     "CallbackSink",
     "TextLineFileSink",
     "JsonlFileSink",
-    "CsvFileSink",
     "NetworkSink",
     "MultiSink",
     "iter_events",
-    "iter_evaluations",
-    "iter_evaluation_rows",
-    "companion_evaluations_path",
     "iter_raw",
     "validate_log",
     "LogValidationError",

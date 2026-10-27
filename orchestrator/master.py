@@ -12,13 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from archipelago_logging import (
-    EVALUATION_CSV_HEADER,
-    CsvFileSink,
     EventLogger,
     JsonlFileSink,
     Sink,
     TerminationReason,
-    evaluation_csv_schema,
     iso_now,
     new_run_id,
 )
@@ -39,7 +36,6 @@ class RunSummary:
     run_id: str
     output_dir: Path
     aggregate_log: Path | None
-    evaluations_csv: Path | None
     termination_reason: str
     wallclock_seconds: float
     islands_completed: int
@@ -115,7 +111,6 @@ class Master:
         )
 
         self.aggregate_sink: Sink | None = None
-        self.evaluation_sink: Sink | None = None
         self.logger: EventLogger | None = None
         self.server: ControlServer | None = None
         self.backend: DockerBackend | None = None
@@ -175,15 +170,6 @@ class Master:
             flush_interval_seconds=self.config.logging.flush_interval_seconds,
         )
 
-        evaluations_path = self.output_dir / "evaluations.csv"
-        self.evaluation_sink = CsvFileSink(
-            evaluations_path,
-            header=EVALUATION_CSV_HEADER,
-            flush_interval_seconds=self.config.logging.flush_interval_seconds,
-        )
-        schema_text = json.dumps(evaluation_csv_schema(), indent=2) + "\n"
-        (self.output_dir / "evaluations.schema.json").write_text(schema_text, encoding="utf-8")
-
         self.logger = EventLogger(
             self.run_id,
             "master",
@@ -200,7 +186,6 @@ class Master:
                 topology=self.topology,
                 logger=self.logger,
                 aggregate_sink=self.aggregate_sink,
-                evaluation_sink=self.evaluation_sink,
                 host=bind_host,
                 port=bind_port,
                 max_pending_per_island=self.config.migration.max_pending_per_island,
@@ -291,9 +276,7 @@ class Master:
                 self.logger.diagnostic(f"run failed: {type(exc).__name__}: {exc}", level="error")
             raise
         finally:
-            summary = self._shutdown(
-                started, termination, island_results, aggregate_path, evaluations_path
-            )
+            summary = self._shutdown(started, termination, island_results, aggregate_path)
 
         return summary
 
@@ -353,7 +336,6 @@ class Master:
         termination: str,
         island_results: list[dict[str, Any]],
         aggregate_path: Path | None,
-        evaluations_path: Path | None,
     ) -> RunSummary:
         """Emit ``run_end``, stop the server and the backend, close the sinks."""
         elapsed = time.monotonic() - started
@@ -438,14 +420,11 @@ class Master:
             self.backend.cleanup()
         if self.aggregate_sink is not None:
             self.aggregate_sink.close()
-        if self.evaluation_sink is not None:
-            self.evaluation_sink.close()
 
         summary = RunSummary(
             run_id=self.run_id,
             output_dir=self.output_dir,
             aggregate_log=aggregate_path,
-            evaluations_csv=evaluations_path,
             termination_reason=termination,
             wallclock_seconds=elapsed,
             islands_completed=completed,

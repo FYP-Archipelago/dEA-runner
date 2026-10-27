@@ -19,7 +19,6 @@ __all__ = [
     "CallbackSink",
     "TextLineFileSink",
     "JsonlFileSink",
-    "CsvFileSink",
     "NetworkSink",
     "MultiSink",
 ]
@@ -93,7 +92,6 @@ class TextLineFileSink(Sink):
         *,
         buffer_bytes: int = 1 << 20,
         flush_interval_seconds: float = 2.0,
-        header: str | None = None,
     ) -> None:
         super().__init__()
         self.path = Path(path)
@@ -105,15 +103,7 @@ class TextLineFileSink(Sink):
         self._lock = threading.Lock()
         self._closed = False
 
-        needs_header = header is not None and (
-            not self.path.exists() or self.path.stat().st_size == 0
-        )
-
         self._handle = open(self.path, "a", encoding="utf-8")
-
-        if needs_header:
-            self._handle.write(header + "\n")
-            self._handle.flush()
 
         self._timer: threading.Timer | None = None
         self._schedule_flush()
@@ -176,25 +166,6 @@ class TextLineFileSink(Sink):
 
 class JsonlFileSink(TextLineFileSink):
     """Append-only JSON Lines file. One JSON object."""
-
-
-class CsvFileSink(TextLineFileSink):
-    """Append-only CSV file with a header row."""
-
-    def __init__(
-        self,
-        path: str | os.PathLike[str],
-        *,
-        header: str,
-        buffer_bytes: int = 1 << 20,
-        flush_interval_seconds: float = 2.0,
-    ) -> None:
-        super().__init__(
-            path,
-            buffer_bytes=buffer_bytes,
-            flush_interval_seconds=flush_interval_seconds,
-            header=header,
-        )
 
 
 class NetworkSink(Sink):

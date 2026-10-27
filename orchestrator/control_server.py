@@ -66,7 +66,6 @@ class ControlServer:
         max_pending_per_island: int = 1000,
         fanout: str = "all",
         evaluation_budget: int | None = None,
-        evaluation_sink: Sink | None = None,
         seed: int | None = None,
     ) -> None:
         self.run_id = run_id
@@ -76,7 +75,6 @@ class ControlServer:
         self.max_pending = max_pending_per_island
         self.fanout = fanout
         self.evaluation_budget = evaluation_budget
-        self.evaluation_sink = evaluation_sink
         self._rngs = {
             island: random.Random(seed_for_broker(seed, island)) for island in topology
         }
@@ -131,8 +129,6 @@ class ControlServer:
                     outer._handle_control(self, int(island_id), hello)
                 elif role == Role.LOG:
                     outer._handle_log_stream(self, island_id, outer.aggregate_sink)
-                elif role == Role.EVALUATIONS:
-                    outer._handle_log_stream(self, island_id, outer.evaluation_sink)
 
         class Server(socketserver.ThreadingTCPServer):
             """Threaded TCP server, one thread per island connection."""

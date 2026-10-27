@@ -14,8 +14,6 @@ import numpy as np
 from algorithms.base import Algorithm, Individual, IslandContext
 from algorithms.registry import create_algorithm
 from archipelago_logging import (
-    EVALUATION_CSV_HEADER,
-    CsvFileSink,
     EventLogger,
     GenomePolicy,
     IndividualIdMinter,
@@ -78,42 +76,31 @@ def build_island_sinks(
     island_id: int,
     output_dir: Path,
     control_address: tuple[str, int] | None,
-) -> tuple[Sink, Sink]:
-    """Build this island's two sink fan-outs: its own shard files, and the stream to the master."""
+) -> Sink:
+    """Build this island's sink: its own shard file, and one ordered stream to the master.
+
+    Every record, evaluation or event, goes through this one sink, so the order the
+    logger assigns ``seq`` in is the order the records travel in.
+    """
     import json
 
-    event_components: list[Sink] = [
+    components: list[Sink] = [
         JsonlFileSink(
             output_dir / "islands" / f"island-{island_id:02d}.jsonl",
             flush_interval_seconds=config.logging.flush_interval_seconds,
         )
     ]
-    evaluation_components: list[Sink] = [
-        CsvFileSink(
-            output_dir / "islands" / f"island-{island_id:02d}.evaluations.csv",
-            header=EVALUATION_CSV_HEADER,
-            flush_interval_seconds=config.logging.flush_interval_seconds,
-        )
-    ]
-
     if control_address is not None:
-        for role, targets in (
-            (Role.LOG, event_components),
-            (Role.EVALUATIONS, evaluation_components),
-        ):
-            handshake = (
-                json.dumps({"role": role, "run_id": run_id, "island_id": island_id}) + "\n"
+        handshake = json.dumps({"role": Role.LOG, "run_id": run_id, "island_id": island_id}) + "\n"
+        components.append(
+            NetworkSink(
+                control_address[0],
+                control_address[1],
+                queue_size=config.logging.network_queue_size,
+                handshake=handshake,
             )
-            targets.append(
-                NetworkSink(
-                    control_address[0],
-                    control_address[1],
-                    queue_size=config.logging.network_queue_size,
-                    handshake=handshake,
-                )
-            )
-
-    return MultiSink(event_components), MultiSink(evaluation_components)
+        )
+    return MultiSink(components)
 
 
 class IslandRunner:
@@ -127,8 +114,6 @@ class IslandRunner:
         *,
         output_dir: Path,
         control_address: tuple[str, int] | None = None,
-        sink: Sink | None = None,
-        evaluation_sink: Sink | None = None,
         container_id: str | None = None,
     ) -> None:
         self.config = config
@@ -143,21 +128,12 @@ class IslandRunner:
             container_id = os.environ.get("ISLAND_CONTAINER_NAME") or socket.gethostname()
         self.container_id = container_id
 
-        if sink is not None:
-            self.sink = sink
-            self.evaluation_sink: Sink | None = evaluation_sink
-            self._owns_sink = False
-        else:
-            self.sink, self.evaluation_sink = build_island_sinks(
-                config, run_id, island_id, self.output_dir, control_address
-            )
-            self._owns_sink = True
+        self.sink = build_island_sinks(config, run_id, island_id, self.output_dir, control_address)
 
         self.logger = EventLogger(
             run_id,
             f"island:{island_id}",
             self.sink,
-            evaluation_sink=self.evaluation_sink,
             island_id=island_id,
             node_id=self.node_id,
         )
@@ -257,9 +233,7 @@ class IslandRunner:
         if self.control is not None:
             self.control.bye(generation=self.ctx.generation, evaluations=self.ctx.evaluations)
             self.control.close()
-        self.logger.flush()
-        if self._owns_sink:
-            self.logger.close()
+        self.logger.close()
 
 
     def _migration_active(self) -> bool:
@@ -424,9 +398,6 @@ class IslandRunner:
         fitnesses = np.fromiter(
             (individual.fitness for individual in population), dtype=float, count=len(population)
         )
-        finite = fitnesses[np.isfinite(fitnesses)]
-        if finite.size == 0:
-            finite = np.array([float("nan")])
 
         picker = np.argmax if self.problem.maximising else np.argmin
         best_index = int(picker(fitnesses))
@@ -442,11 +413,11 @@ class IslandRunner:
 
         self.logger.generation_end(
             generation=generation,
-            best_fitness=float(np.max(finite) if self.problem.maximising else np.min(finite)),
-            mean_fitness=float(np.mean(finite)),
-            worst_fitness=float(np.min(finite) if self.problem.maximising else np.max(finite)),
-            median_fitness=float(np.median(finite)),
-            std_fitness=float(np.std(finite)),
+            best_fitness=float(np.max(fitnesses) if self.problem.maximising else np.min(fitnesses)),
+            mean_fitness=float(np.mean(fitnesses)),
+            worst_fitness=float(np.min(fitnesses) if self.problem.maximising else np.max(fitnesses)),
+            median_fitness=float(np.median(fitnesses)),
+            std_fitness=float(np.std(fitnesses)),
             maximising=self.problem.maximising,
             best_individual_id=best.individual_id,
             best_genome_hash=self.genome_policy.encode(

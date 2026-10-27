@@ -29,7 +29,6 @@ class Role:
 
     CONTROL = "control"
     LOG = "log"
-    EVALUATIONS = "evaluations"
 
 
 class Op:

@@ -3,8 +3,8 @@
 #
 # This is the configuration to use when the goal is *the dataset* rather than a
 # particular experiment. Everything is sized from `evaluation_budget`, so the
-# resulting evaluations.csv has a known number of rows regardless of which
-# algorithm or problem is swapped in.
+# run has a known number of evaluation records regardless of which algorithm or
+# problem is swapped in.
 #
 #   python -m orchestrator.cli run --config config/full_dataset.yaml
 

@@ -18,7 +18,6 @@ from .events import (
     MigrationSendEvent,
     RunEndEvent,
     RunStartEvent,
-    format_evaluation_csv_row,
 )
 from .genome import EncodedGenome
 from .sinks import NullSink, Sink
@@ -36,14 +35,12 @@ class EventLogger:
         emitter: str,
         sink: Sink | None = None,
         *,
-        evaluation_sink: Sink | None = None,
         island_id: int | None = None,
         node_id: str | None = None,
     ) -> None:
         self.run_id = run_id
         self.emitter = emitter
         self.sink: Sink = sink if sink is not None else NullSink()
-        self.evaluation_sink: Sink | None = evaluation_sink
         self.island_id = island_id
         self.node_id = node_id
 
@@ -71,14 +68,10 @@ class EventLogger:
     def flush(self) -> None:
         """Flush the underlying sinks."""
         self.sink.flush()
-        if self.evaluation_sink is not None:
-            self.evaluation_sink.flush()
 
     def close(self) -> None:
         """Flush and close the underlying sinks."""
         self.sink.close()
-        if self.evaluation_sink is not None:
-            self.evaluation_sink.close()
 
     def __enter__(self) -> "EventLogger":
         return self
@@ -105,10 +98,7 @@ class EventLogger:
             type_name = getattr(event, "type", model.__name__)
             self._counts[type_name] = self._counts.get(type_name, 0) + 1
 
-            if self.evaluation_sink is not None and isinstance(event, EvaluationEvent):
-                self.evaluation_sink.write(format_evaluation_csv_row(event))
-            else:
-                self.sink.write(event.to_json_line())
+            self.sink.write(event.to_json_line())
 
         return event
 

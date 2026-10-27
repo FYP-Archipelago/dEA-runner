@@ -86,7 +86,6 @@ def _command_run(args: argparse.Namespace) -> int:
           f"in {summary.wallclock_seconds:.1f}s")
     print(f"  output           {summary.output_dir}")
     print(f"  events           {summary.aggregate_log}")
-    print(f"  evaluations      {summary.evaluations_csv}")
     print(f"  islands          {summary.islands_completed} completed, {summary.islands_failed} failed")
     print(f"  evaluations      {summary.total_evaluations:,} "
           f"({100.0 * summary.total_evaluations / max(1, config.evaluation_budget):.1f}% of budget)")
@@ -102,12 +101,14 @@ def _command_run(args: argparse.Namespace) -> int:
 
 
 def _command_verify_log(args: argparse.Namespace) -> int:
-    from archipelago_logging.reader import LogValidationError, validate_log
+    from archipelago_logging.reader import LogValidationError, iter_raw, validate_log
 
     try:
-        report = validate_log(args.path, require_run_end=not args.allow_incomplete)
+        report = validate_log(
+            iter_raw(args.path, strict=True), require_run_end=not args.allow_incomplete
+        )
     except LogValidationError as exc:
-        print(f"INVALID: {exc}", file=sys.stderr)
+        print(f"INVALID: {args.path}: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(report, indent=2))
     return 0
@@ -138,9 +139,8 @@ def main(argv: list[str] | None = None) -> int:
 
     verify_parser = subparsers.add_parser(
         "verify-log",
-        help="Check a run's logs against the schema's structural invariants. Reads the "
-        "JSON Lines file and its companion evaluations.csv together, since `seq` "
-        "spans both.",
+        help="Check a run's log against the schema's structural invariants, including "
+        "that every emitter's records arrived in seq order.",
     )
     verify_parser.add_argument("path", help="Path to a run's .jsonl file.")
     verify_parser.add_argument(
