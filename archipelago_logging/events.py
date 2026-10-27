@@ -151,7 +151,7 @@ class RunStartEvent(BaseEvent):
 
     type: Literal["run_start"] = "run_start"
     started_at: str = Field(description="Human-facing UTC ISO 8601 timestamp.")
-    harness_version: str = Field(description="Version of the dEA harness that produced this log.")
+    harness_version: str = Field(description="Version of the Runner that produced this record (the field keeps its historical name).")
     algorithm: str = Field(description="Registry name of the EA, e.g. 'de'.")
     benchmark: str = Field(description="Registry name of the problem, e.g. 'sphere'.")
     num_islands: int
@@ -432,7 +432,7 @@ class MigrationArriveEvent(IslandEvent):
 
 
 class DiagnosticEvent(BaseEvent):
-    """Free-form harness diagnostics kept in-band with the run."""
+    """Free-form Runner diagnostics kept in-band with the run."""
 
     type: Literal["diagnostic"] = "diagnostic"
     level: str = DiagnosticLevel.INFO.value

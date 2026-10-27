@@ -13,8 +13,8 @@ from ..config import BROKER_URL_ENV
 __all__ = [
     "DockerBackend",
     "DockerUnavailable",
-    "WorkerSpec",
-    "WorkerStatus",
+    "IslandSpec",
+    "IslandContainerStatus",
     "HOST_RUNS_DIR_ENV",
 ]
 
@@ -22,8 +22,8 @@ HOST_RUNS_DIR_ENV = "HOST_RUNS_DIR"
 
 
 @dataclass
-class WorkerSpec:
-    """Everything one island worker needs to start."""
+class IslandSpec:
+    """Everything one island container needs to start."""
 
     island_id: int
     run_id: str
@@ -35,7 +35,7 @@ class WorkerSpec:
 
 
 @dataclass
-class WorkerStatus:
+class IslandContainerStatus:
     """Whether one island's container is still running."""
 
     island_id: int
@@ -57,7 +57,7 @@ class DockerBackend:
         *,
         image: str,
         run_id: str,
-        dockerfile: str = "docker/Dockerfile.worker",
+        dockerfile: str = "docker/Dockerfile.island",
         build_context: str = ".",
         build: bool = True,
         build_network: str | None = None,
@@ -92,7 +92,7 @@ class DockerBackend:
         self.memory = memory
         self.labels = {
             "app": "archipelago",
-            "component": "island-worker",
+            "component": "island",
             "archipelago.run_id": run_id,
         }
         self.repository_root = Path(repository_root or Path(__file__).resolve().parents[2])
@@ -104,7 +104,7 @@ class DockerBackend:
         self._node_ids: dict[int, str] = {}
         self._build_log: list[str] = []
         self.network_name: str = f"archipelago-{run_id[-8:]}"
-        self.worker_network: str = self.network_name
+        self.island_network: str = self.network_name
         self._created_network: Any | None = None
         self.master_alias: str | None = None
         self._master_container: Any | None = None
@@ -113,12 +113,12 @@ class DockerBackend:
 
 
     def prepare(self) -> None:
-        """Make the worker image and the run's network ready, in that order."""
+        """Make the island image and the run's network ready, in that order."""
         self._ensure_image()
         self._ensure_network()
 
     def _ensure_image(self) -> None:
-        """Ensure a usable worker image exists, building it when asked to."""
+        """Ensure a usable island image exists, building it when asked to."""
         import docker.errors
 
         image_exists = True
@@ -130,7 +130,7 @@ class DockerBackend:
         if not self.build:
             if not image_exists:
                 raise DockerUnavailable(
-                    f"worker image {self.image!r} not found and docker.build is false. "
+                    f"island image {self.image!r} not found and docker.build is false. "
                     f"Build it with:  docker build --network=host -f {self.dockerfile} "
                     f"-t {self.image} ."
                 )
@@ -175,7 +175,7 @@ class DockerBackend:
                 self._check_image_freshness(prefix=self.build_warning)
                 return
             raise DockerUnavailable(
-                f"could not build worker image {self.image!r}: {exc}.{hint} "
+                f"could not build island image {self.image!r}: {exc}.{hint} "
                 f"Build it by hand with:  docker build --network=host "
                 f"-f {self.dockerfile} -t {self.image} ."
             ) from exc
@@ -194,22 +194,22 @@ class DockerBackend:
             self._created_network = self.client.networks.create(
                 self.network_name, driver="bridge", labels=self.labels
             )
-            self.worker_network = self.network_name
+            self.island_network = self.network_name
             self._attach_master(master)
         else:
-            self.worker_network = "host"
+            self.island_network = "host"
             self.network_name = "host"
 
     def _attach_master(self, container: Any) -> None:
         """Join the islands' network, so they can reach us by name."""
         try:
-            self.client.networks.get(self.worker_network).connect(
+            self.client.networks.get(self.island_network).connect(
                 container.id, aliases=[self.MASTER_ALIAS]
             )
         except Exception as exc:
             raise DockerUnavailable(
                 f"the master is running in container {container.id[:12]} but could not join "
-                f"the island network {self.worker_network!r}: {exc}. A master container "
+                f"the island network {self.island_network!r}: {exc}. A master container "
                 "started with --network host cannot be attached to another network; start it "
                 "without that flag, or run the master on the host instead."
             ) from exc
@@ -230,11 +230,11 @@ class DockerBackend:
         "algorithms",
         "benchmarks",
         "orchestrator",
-        "requirements-worker.txt",
+        "requirements-island.txt",
     )
 
     def _check_image_freshness(self, prefix: str | None = None) -> None:
-        """Warn when the worker image predates the source it was built from."""
+        """Warn when the island image predates the source it was built from."""
         import datetime
         import re
 
@@ -265,7 +265,7 @@ class DockerBackend:
         if newest > image_time:
             age = newest - image_time
             message = (
-                f"worker image {self.image!r} was built {age / 60:.1f} minutes before the newest "
+                f"island image {self.image!r} was built {age / 60:.1f} minutes before the newest "
                 f"source file ({newest_path}); the containers will run stale code. Rebuild with: "
                 f"docker build --network=host -f {self.dockerfile} -t {self.image} ."
             )
@@ -287,7 +287,7 @@ class DockerBackend:
             return str(path)
         return str(Path(host_root) / relative)
 
-    def launch(self, spec: WorkerSpec) -> str:
+    def launch(self, spec: IslandSpec) -> str:
         """Create and start one island's container."""
         output_dir = spec.output_dir.resolve()
         command = [
@@ -324,9 +324,9 @@ class DockerBackend:
             labels={**self.labels, "archipelago.island_id": str(spec.island_id)},
             environment=environment,
             volumes=volumes,
-            network=self.worker_network,
+            network=self.island_network,
             extra_hosts=(
-                {} if self.worker_network == "host"
+                {} if self.island_network == "host"
                 else {"host.docker.internal": "host-gateway"}
             ),
             nano_cpus=int(self.cpus * 1e9),
@@ -341,16 +341,16 @@ class DockerBackend:
         self._node_ids[spec.island_id] = container_name
         return container_name
 
-    def statuses(self) -> dict[int, WorkerStatus]:
+    def statuses(self) -> dict[int, IslandContainerStatus]:
         """Poll container states."""
-        result: dict[int, WorkerStatus] = {}
+        result: dict[int, IslandContainerStatus] = {}
         for island_id, container in self._containers.items():
             try:
                 container.reload()
                 running = bool(container.attrs.get("State", {}).get("Running"))
             except Exception:
                 running = False
-            result[island_id] = WorkerStatus(
+            result[island_id] = IslandContainerStatus(
                 island_id=island_id,
                 node_id=self._node_ids.get(island_id, ""),
                 running=running,
@@ -398,7 +398,7 @@ class DockerBackend:
             "image": self.image,
             "cpus": self.cpus,
             "memory": self.memory,
-            "network": self.worker_network,
+            "network": self.island_network,
             "network_created_for_this_run": self._created_network is not None,
             "master_networks": self._master_networks,
             "master_in_container": self.master_alias is not None,

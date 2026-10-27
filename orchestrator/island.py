@@ -1,4 +1,4 @@
-"""Island worker entrypoint."""
+"""Island container entrypoint."""
 
 from __future__ import annotations
 
@@ -13,12 +13,12 @@ from typing import Any
 from orchestrator.config import RunConfig, load_config
 from orchestrator.island_runner import IslandRunner
 
-__all__ = ["main", "run_worker"]
+__all__ = ["main", "run_island"]
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="orchestrator.worker",
+        prog="orchestrator.island",
         description="Run a single Archipelago island. Normally launched by the master, "
         "but runnable by hand for debugging one island in isolation.",
     )
@@ -35,7 +35,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def run_worker(
+def run_island(
     config: RunConfig,
     *,
     run_id: str,
@@ -84,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
     result_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        result = run_worker(
+        result = run_island(
             config,
             run_id=args.run_id,
             island_id=args.island_id,

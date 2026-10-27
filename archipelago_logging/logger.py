@@ -173,7 +173,7 @@ class EventLogger:
         level: str = DiagnosticLevel.INFO.value,
         **context: Any,
     ) -> DiagnosticEvent:
-        """Emit a free-form harness note, in band with the run."""
+        """Emit a free-form Runner note, in band with the run."""
         return self.emit(
             DiagnosticEvent, message=message, level=level, context=context
         )

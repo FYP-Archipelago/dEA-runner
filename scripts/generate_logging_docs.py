@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regenerate the field reference and worked examples in ``docs/LOGGING_FORMAT.md``.
 
-The examples come from a real run, so regenerating them needs Docker, a worker image built
+The examples come from a real run, so regenerating them needs Docker, an island image built
 from the current source, and a Redis the islands can reach; ``--fields-only`` and ``--check``
 need none of them.
 """
@@ -100,8 +100,8 @@ def _model_summary(model: type[BaseEvent]) -> str:
 def build_field_reference() -> str:
     """Render the envelope and every event's fields."""
     parts: list[str] = [
-        "### The JSON Lines envelope\n",
-        "Present on **every** record in `run.jsonl`, in this order.\n",
+        "### The envelope\n",
+        "Present on **every** record, in this order.\n",
         _table(_field_rows(BaseEvent, skip_envelope=False)),
     ]
     for type_name in EVENT_ORDER:
@@ -239,8 +239,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--image",
-        default="archipelago-worker:latest",
-        help="Worker image for the example run. It must already exist and be current.",
+        default="archipelago-island:latest",
+        help="Island image for the example run. It must already exist and be current.",
     )
     parser.add_argument(
         "--broker-url",

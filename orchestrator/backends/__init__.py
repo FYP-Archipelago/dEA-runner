@@ -1,10 +1,10 @@
 """How island containers are launched."""
 
-from .docker_backend import DockerBackend, DockerUnavailable, WorkerSpec, WorkerStatus
+from .docker_backend import DockerBackend, DockerUnavailable, IslandSpec, IslandContainerStatus
 
 __all__ = [
     "DockerBackend",
     "DockerUnavailable",
-    "WorkerSpec",
-    "WorkerStatus",
+    "IslandSpec",
+    "IslandContainerStatus",
 ]

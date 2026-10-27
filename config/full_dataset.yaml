@@ -51,9 +51,9 @@ logging:
   genome_precision_decimals: 4
 
 docker:
-  image: archipelago-worker:latest
+  image: archipelago-island:latest
   build: true          # built automatically if missing or older than the sources
-  dockerfile: docker/Dockerfile.worker
+  dockerfile: docker/Dockerfile.island
   cpus: 1.0
   memory: 2g
   # Docker's builder VM may not inherit the host resolver, which shows up as pip

@@ -1,4 +1,4 @@
-"""Worker-side client for the master's control channel."""
+"""Island-side client for the master's control channel."""
 
 from __future__ import annotations
 

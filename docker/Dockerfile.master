@@ -1,36 +1,44 @@
 # Master/coordinator image.
 #
 # The default deployment runs everything in containers: this image runs the
-# master, and the master creates one worker container per island from
-# docker/Dockerfile.worker.
+# master, and the master creates one container per island from
+# docker/Dockerfile.island.
 #
 #   docker build --network=host -f docker/Dockerfile.master -t archipelago-master:latest .
-#   docker run --rm \
+#   docker network create archipelago
+#   docker run -d --name redis --network archipelago redis:7-alpine --maxmemory-policy noeviction
+#   docker run --rm --network archipelago \
 #     -v /var/run/docker.sock:/var/run/docker.sock \
 #     -v "$PWD/runs:/archipelago/runs" \
 #     -e HOST_RUNS_DIR="$PWD/runs" \
-#     --network host \
+#     -e ARCHIPELAGO_BROKER__URL=redis://redis:6379/0 \
 #     archipelago-master:latest run --config config/docker_de_sphere.yaml
 #
-# The three run-time arguments are each load-bearing:
+# The run-time arguments are each load-bearing:
 #
-#   docker.sock       the master creates and destroys sibling worker containers,
+#   --network         a network where Redis is reachable. The master also creates a
+#                     private network per run for its islands, and connects every
+#                     island to the master's own networks, so islands reach Redis at
+#                     the same URL. Do not use --network host: a container on the
+#                     host network cannot join the run's network.
+#   ARCHIPELAGO_BROKER__URL
+#                     where every record goes. A password in it is redacted wherever
+#                     the config is logged; islands receive the real URL by
+#                     environment variable.
+#   docker.sock       the master creates and destroys sibling island containers,
 #                     so it needs a daemon. This is Docker-outside-of-Docker: the
-#                     workers are siblings of the master, not children.
+#                     islands are siblings of the master, not children.
 #   HOST_RUNS_DIR     a bind-mount source is resolved by the daemon against the
 #                     HOST filesystem, so the master must know the host path its
 #                     own /archipelago/runs came from before it can mount a run
-#                     directory into a worker. Without it the workers get an empty
-#                     directory and die looking for their config file.
-#   --network host    the master binds an ephemeral control port that workers
-#                     reach at host.docker.internal; sharing the host network
-#                     namespace is the simplest way to make that port reachable.
+#                     directory into an island. Without it the islands get an empty
+#                     directory and die looking for their config file. (The run
+#                     directory and this variable go away in M4.4 of the plan.)
 #
 # Mounting the Docker socket grants this container effective root on the host.
 # That is a real trade, made knowingly: the alternative is running the master on
 # the host with `python -m orchestrator.cli run`, which is fully supported and is
 # what the tests do: the master on the host, each island still in a container.
-
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -48,7 +56,7 @@ COPY benchmarks/ ./benchmarks/
 COPY orchestrator/ ./orchestrator/
 COPY config/ ./config/
 COPY docker/ ./docker/
-COPY requirements-worker.txt ./
+COPY requirements-island.txt ./
 
 # Runs as root, deliberately: it needs to reach the mounted Docker socket, whose
 # group id is not knowable at build time.

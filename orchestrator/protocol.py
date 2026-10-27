@@ -1,4 +1,4 @@
-"""Wire protocol between the master and the island workers."""
+"""Wire protocol between the master and its islands."""
 
 from __future__ import annotations
 

@@ -39,7 +39,7 @@ benchmark_params:
 
 TSPLIB's integer rounding is reproduced exactly — `EUC_2D` rounds to the nearest
 integer, `ATT` uses its own pseudo-Euclidean rule — so a tour length from this
-harness is directly comparable with the published optima above. Set
+Runner is directly comparable with the published optima above. Set
 `termination.target_fitness` to one of them to stop as soon as an island solves
 the instance.
 

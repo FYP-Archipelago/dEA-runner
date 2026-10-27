@@ -14,7 +14,7 @@ from typing import Any
 from archipelago_logging import EventLogger, TerminationReason, iso_now, new_run_id
 from archipelago_logging.version import HARNESS_VERSION, SCHEMA_VERSION
 
-from .backends import DockerBackend, WorkerSpec
+from .backends import DockerBackend, IslandSpec
 from .config import RunConfig
 from .control_server import ControlServer
 from .redis_stream import BrokerError, RedisStreamWriter, ping_broker, stream_key, stream_length
@@ -133,13 +133,13 @@ class Master:
         return host, self.config.execution.control_port
 
     def _advertise_host(self) -> str:
-        """The address workers use to reach the master."""
+        """The address islands use to reach the master."""
         if self.config.execution.advertise_host:
             return self.config.execution.advertise_host
         alias = getattr(self.backend, "master_alias", None)
         if alias:
             return alias
-        if getattr(self.backend, "worker_network", None) == "host":
+        if getattr(self.backend, "island_network", None) == "host":
             return self.config.execution.control_host
         return "host.docker.internal"
 
@@ -248,7 +248,7 @@ class Master:
 
             advertise = self._advertise_host()
             for island_id in range(self.config.num_islands):
-                spec = WorkerSpec(
+                spec = IslandSpec(
                     island_id=island_id,
                     run_id=self.run_id,
                     config_path=config_path.resolve(),
@@ -260,7 +260,7 @@ class Master:
                 node_id = self.backend.launch(spec)
                 self._node_ids[island_id] = node_id
                 self.logger.diagnostic(
-                    "island worker launched",
+                    "island container launched",
                     island_id=island_id,
                     node_id=node_id,
                     backend=self.backend.name,
@@ -280,7 +280,7 @@ class Master:
         return summary
 
     def _supervise(self, started: float) -> str:
-        """Wait for the workers to finish, or for the wall-clock limit to expire."""
+        """Wait for the islands to finish, or for the wall-clock limit to expire."""
         assert self.backend is not None and self.server is not None and self.logger is not None
 
         limit = self.config.termination.time_limit_seconds

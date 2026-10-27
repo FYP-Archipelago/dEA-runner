@@ -181,12 +181,12 @@ class ExecutionConfig(_Base):
     )
     advertise_host: str | None = Field(
         default=None,
-        description="Address workers use to reach the master. Defaults to the master's alias on the run's network when the master is itself a container, to control_host when the islands share the host network, and to the Docker host gateway otherwise.",
+        description="Address islands use to reach the master. Defaults to the master's alias on the run's network when the master is itself a container, to control_host when the islands share the host network, and to the Docker host gateway otherwise.",
     )
     connect_timeout_seconds: float = Field(
         default=60.0,
         gt=0.0,
-        description="How long a worker retries the master's control socket at startup before giving up and running standalone (no migration). Containers can take several seconds to start, so this needs headroom.",
+        description="How long an island retries the master's control socket at startup before giving up and running standalone (no migration). Containers can take several seconds to start, so this needs headroom.",
     )
     heartbeat_interval_seconds: float = Field(
         default=2.0,
@@ -196,25 +196,25 @@ class ExecutionConfig(_Base):
     shutdown_grace_seconds: float = Field(
         default=20.0,
         gt=0.0,
-        description="How long a worker gets to finish its generation and flush its logs after being asked to stop, before it is killed.",
+        description="How long an island gets to finish its generation and flush its records after being asked to stop, before it is killed.",
     )
 
 
 class DockerConfig(_Base):
-    """Worker container image and resource limits."""
+    """Island container image and resource limits."""
 
-    image: str = Field(default="archipelago-worker:latest")
+    image: str = Field(default="archipelago-island:latest")
     build: bool = Field(
         default=True, description="Build the image from `dockerfile` if it is missing or out of date."
     )
-    dockerfile: str = Field(default="docker/Dockerfile.worker")
+    dockerfile: str = Field(default="docker/Dockerfile.island")
     build_context: str = Field(default=".")
     build_network: str | None = Field(
         default=None,
         description="Network mode for the image build. Leave unset for the daemon default.",
     )
     cpus: float = Field(default=1.0, gt=0.0, description="CPU quota.")
-    memory: str = Field(default="2g", description="Memory limit per worker container, e.g. '2g'.")
+    memory: str = Field(default="2g", description="Memory limit per island container, e.g. '2g'.")
 
 
 class RunConfig(_Base):
@@ -270,7 +270,7 @@ class RunConfig(_Base):
     @field_validator("run_id")
     @classmethod
     def _run_id_shape(cls, run_id: str | None) -> str | None:
-        """A supplied run id must have the shape the harness mints."""
+        """A supplied run id must have the shape `new_run_id` mints."""
         return run_id if run_id is None else check_run_id(run_id)
 
     @model_validator(mode="after")

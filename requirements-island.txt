@@ -1,0 +1,9 @@
+# Dependencies for an island container. Deliberately excludes the docker
+# SDK: an island never launches containers, and giving it the client (and, with
+# it, any mounted socket) would be an avoidable widening of what a compromised or
+# buggy island could reach.
+
+numpy>=2.0
+pydantic>=2.7
+PyYAML>=6.0
+redis>=5.0

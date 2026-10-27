@@ -1,6 +1,6 @@
-# Island worker image.
+# Island image: one container per island.
 # Build:
-#   docker build -f docker/Dockerfile.worker -t archipelago-worker:latest .
+#   docker build -f docker/Dockerfile.island -t archipelago-island:latest .
 #
 # The master builds it automatically when docker.build is true.
 
@@ -15,8 +15,8 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /archipelago
 
-COPY requirements-worker.txt ./
-RUN pip install --no-cache-dir -r requirements-worker.txt
+COPY requirements-island.txt ./
+RUN pip install --no-cache-dir -r requirements-island.txt
 
 COPY archipelago_logging/ ./archipelago_logging/
 COPY algorithms/ ./algorithms/
@@ -31,6 +31,6 @@ RUN useradd --create-home --uid 1000 archipelago \
 USER archipelago
 
 # Overridden by the master with the island id, run id, config path and control
-# address. Present so `docker run archipelago-worker:latest --help` is useful.
-ENTRYPOINT ["python", "-m", "orchestrator.worker"]
+# address. Present so `docker run archipelago-island:latest --help` is useful.
+ENTRYPOINT ["python", "-m", "orchestrator.island"]
 CMD ["--help"]

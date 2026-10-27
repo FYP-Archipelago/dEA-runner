@@ -31,6 +31,6 @@ testpaths = ["tests"]
 # enough to be worth marking so it can be excluded with `-m "not slow"`.
 addopts = "-q --strict-markers"
 markers = [
-    "slow: end-to-end runs that launch real worker processes",
+    "slow: end-to-end runs that launch real island containers",
     "docker: requires a reachable Docker daemon",
 ]

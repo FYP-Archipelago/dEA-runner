@@ -72,8 +72,8 @@ _TRANSIENT_CODES = ("BUSY ", "MASTERDOWN ", "NOREPLICAS ")
 
 
 def stream_key(run_id: str) -> str:
-    """The run's log stream, as agreed with the backend."""
-    return f"run:{run_id}:runner_logs"
+    """The run's stream of records: ``run:{id}:raw`` in the platform architecture."""
+    return f"run:{run_id}:raw"
 
 
 class BrokerError(RuntimeError):

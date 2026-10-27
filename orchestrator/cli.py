@@ -1,4 +1,4 @@
-"""Command-line interface to the baseline dEA harness."""
+"""Command-line interface to the baseline dEA Runner."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def _print_plan(config) -> None:
           f"  every {config.migration.interval} gen"
           f"  x{config.migration.num_migrants} ({config.migration.selection} -> "
           f"{config.migration.replacement}, fanout={config.migration.fanout})")
-    print(f"  worker image   {config.docker.image}")
+    print(f"  island image   {config.docker.image}")
     print(f"  broker         {redact_url(config.broker.url)}")
 
 
@@ -121,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     """Parse arguments and dispatch to the chosen subcommand."""
     parser = argparse.ArgumentParser(
         prog="orchestrator.cli",
-        description="Archipelago baseline distributed EA harness.",
+        description="Archipelago baseline dEA Runner.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

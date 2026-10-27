@@ -33,7 +33,7 @@ def resolve_instance_path(path: str | Path, *, what: str = "instance file") -> P
     resolved = candidate if candidate.is_absolute() else REPOSITORY_ROOT / candidate
     if not resolved.exists():
         raise FileNotFoundError(
-            f"{what} not found: {resolved}. Instance files are required -- this harness "
+            f"{what} not found: {resolved}. Instance files are required -- the Runner "
             f"does not generate substitutes. The shipped instances are committed under "
             f"benchmarks/data/; restore a missing one from git."
         )
