@@ -2,10 +2,13 @@
 # record as it lands in Redis.
 #
 #   cp .env.example .env          # set REDIS_PASSWORD and RUN_CONFIGS
-#   docker compose up --build
+#   docker compose up -d --build
+#   docker compose logs -f dummy-worker
 #
 # The master runs every config in RUN_CONFIGS, one after another, then exits; Redis and
-# the dummy worker keep running. More runs, and checking one:
+# the dummy worker keep running. Redis keeps everything in memory: stopping it (stop,
+# restart, down, or Ctrl+C on an attached `up`) deletes every stream. More runs, and
+# checking one:
 #   docker compose run --rm master run --config config/ga_tsp.yaml config/es_schwefel.yaml
 #   docker compose run --rm master verify-log <run id>
 #

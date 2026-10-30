@@ -141,10 +141,14 @@ def _print_summary(config, summary) -> None:
 def _command_verify_log(args: argparse.Namespace) -> int:
     from archipelago_logging import LogValidationError, validate_log
 
-    from .redis_stream import read_stream, stream_key
+    from .redis_stream import read_stream, stream_key, stream_length
 
     url = args.url or load_config().broker.url
     key = stream_key(args.run_id)
+    if stream_length(url, key) == 0:
+        print(f"INVALID: {key} is not in Redis: wrong run id, or Redis restarted since the run "
+              "(it keeps nothing across a restart)", file=sys.stderr)
+        return 1
     try:
         report = validate_log(read_stream(url, key), require_run_end=not args.allow_incomplete)
     except LogValidationError as exc:

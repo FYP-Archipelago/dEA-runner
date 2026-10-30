@@ -15,8 +15,9 @@ Everything runs in Docker: Redis, the master, and one container per island. All 
 Docker daemon; the benchmark instances are committed to the repository, so nothing is downloaded.
 
 ```bash
-cp .env.example .env              # set REDIS_PASSWORD, and RUN_CONFIGS to the configs to run
-docker compose up --build
+cp .env.example .env                  # set REDIS_PASSWORD, and RUN_CONFIGS to the configs to run
+docker compose up -d --build
+docker compose logs -f dummy-worker   # the records as the Worker Pool sees them
 ```
 
 That starts Redis (password from `.env`, `noeviction`), a dummy worker that prints every record
@@ -24,11 +25,15 @@ as it lands, and the master, which runs each config in `RUN_CONFIGS` in turn and
 master creates each run's islands itself, as sibling containers through the Docker socket.
 Every record goes to the Redis stream `run:<run id>:raw`, and nothing is written to disk.
 
+**Stopping Redis deletes every stream.** It keeps everything in memory, so `docker compose
+stop`, `restart` and `down`, and Ctrl+C on an attached `docker compose up`, all empty it. Start
+the stack detached and follow the logs instead: Ctrl+C on `logs -f` stops only the logs.
+
 ```bash
+docker compose logs master                              # the runs' plans and outcomes
 docker compose run --rm master run --config config/ga_tsp.yaml config/es_schwefel.yaml
 docker compose run --rm master verify-log <run id>     # every record present, each island in order
-docker compose logs -f dummy-worker                     # the records as the Worker Pool sees them
-docker compose down
+docker compose down                                     # removes Redis, and every stream with it
 ```
 
 [`docs/RUNNING.md`](docs/RUNNING.md) covers the rest: running the master on the host, reading a
