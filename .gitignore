@@ -6,6 +6,7 @@ __pycache__/
 *.egg-info/
 *.zip
 CLAUDE.md
+.env
 tests
 docs
 
@@ -13,4 +14,4 @@ docs
 # gets byte-identical data without needing network access. That is deliberate:
 # searches in this harness are not reproducible, so the dataset is the only thing
 # that must be, and committing it removes any doubt.
-# Verify with: python scripts/fetch_datasets.py --verify
+# Verified against benchmarks/data/MANIFEST.json by tests/test_datasets.py.

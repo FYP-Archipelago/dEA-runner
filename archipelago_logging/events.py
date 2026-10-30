@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import csv
-import io
-import json
 from enum import Enum
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 from .version import SCHEMA_VERSION
 
 __all__ = [
     "EventType",
+    "RecordKind",
     "Operator",
     "TerminationReason",
     "DiagnosticLevel",
@@ -30,12 +28,6 @@ __all__ = [
     "AnyEvent",
     "EVENT_MODELS",
     "parse_event",
-    "EVALUATION_CSV_COLUMNS",
-    "EVALUATION_CSV_HEADER",
-    "PARENT_ID_SEPARATOR",
-    "evaluation_csv_schema",
-    "format_evaluation_csv_row",
-    "evaluation_from_csv_row",
 ]
 
 class EventType(str, Enum):
@@ -52,6 +44,18 @@ class EventType(str, Enum):
     DIAGNOSTIC = "diagnostic"
 
 
+class RecordKind(str, Enum):
+    """The ``kind`` field of a stream entry, so a consumer can route without decoding ``data``."""
+
+    ROW = "row"
+    EVENT = "event"
+
+    @classmethod
+    def of(cls, event_type: str) -> "RecordKind":
+        """``row`` for an evaluation record, ``event`` for every other type."""
+        return cls.ROW if event_type == EventType.EVALUATION.value else cls.EVENT
+
+
 class Operator(str, Enum):
     """What produced an individual -- the label on the incoming STN edge."""
 
@@ -65,7 +69,6 @@ class Operator(str, Enum):
     MIGRATION_ARRIVAL = "migration_arrival"
     ELITE_COPY = "elite_copy"
     CLONE = "clone"
-    REEVALUATION = "reevaluation"
 
 
 class TerminationReason(str, Enum):
@@ -79,13 +82,11 @@ class TerminationReason(str, Enum):
     TIME_LIMIT = "time_limit"
     ERROR = "error"
     ABORTED = "aborted"
-    INSUFFICIENT_ISLANDS = "insufficient_islands"
 
 
 class DiagnosticLevel(str, Enum):
     """Severity of a diagnostic record."""
 
-    DEBUG = "debug"
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -94,7 +95,11 @@ class DiagnosticLevel(str, Enum):
 class BaseEvent(BaseModel):
     """Fields present on every record in the stream."""
 
-    model_config = ConfigDict(extra="allow", use_enum_values=True, validate_assignment=False)
+    # JSON has no inf or NaN: Pydantic would write them as null, leaving a record no reader
+    # accepts. Rejecting them here fails the write that produced one, loudly.
+    model_config = ConfigDict(
+        extra="forbid", use_enum_values=True, validate_assignment=False, allow_inf_nan=False
+    )
 
     schema_version: str = Field(
         default=SCHEMA_VERSION,
@@ -116,11 +121,11 @@ class BaseEvent(BaseModel):
     )
     island_id: int | None = Field(
         default=None,
-        description="Island this record concerns. Null for whole-run master records.",
+        description="Island this record concerns. Null for whole-run master records; required on every record an island writes.",
     )
     generation: int | None = Field(
         default=None,
-        description="Logical generation on island_id at emit time. Null where not applicable. Islands are asynchronous: equal generation numbers on two islands do NOT imply the same wall-clock moment.",
+        description="Logical generation on island_id at emit time. Null for whole-run master records; required on every record an island writes.",
     )
     node_id: str | None = Field(
         default=None,
@@ -132,12 +137,21 @@ class BaseEvent(BaseModel):
         return self.model_dump_json(exclude_none=True)
 
 
+class IslandEvent(BaseEvent):
+    """A record written by an island, which always says which island and at what generation."""
+
+    island_id: int = Field(description="Island that wrote this record.")
+    generation: int = Field(
+        description="The island's logical generation when the record was written. Islands are asynchronous: equal generation numbers on two islands do NOT imply the same wall-clock moment.",
+    )
+
+
 class RunStartEvent(BaseEvent):
     """First record of a run. Carries the fully resolved configuration."""
 
     type: Literal["run_start"] = "run_start"
     started_at: str = Field(description="Human-facing UTC ISO 8601 timestamp.")
-    harness_version: str = Field(description="Version of the dEA harness that produced this log.")
+    harness_version: str = Field(description="Version of the Runner that produced this record (the field keeps its historical name).")
     algorithm: str = Field(description="Registry name of the EA, e.g. 'de'.")
     benchmark: str = Field(description="Registry name of the problem, e.g. 'sphere'.")
     num_islands: int
@@ -154,9 +168,8 @@ class RunStartEvent(BaseEvent):
         description="The generation count the population size was derived to land near. A target, not a limit: a run normally ends on stagnation before reaching it.",
     )
     max_generations: int = Field(description="Safety cap on generations.")
-    backend: str = Field(description="Execution backend: 'local' or 'docker'.")
+    backend: str = Field(description="Execution backend that launched the islands: 'docker'.")
     datasets: dict[str, Any] = Field(
-        default_factory=dict,
         description="Provenance of the benchmark instance actually used: name, source (file path or generator), and the SHA-256 of the instance file where there is one.",
     )
     migration: dict[str, Any] = Field(
@@ -169,7 +182,7 @@ class RunStartEvent(BaseEvent):
     )
 
 
-class IslandStartEvent(BaseEvent):
+class IslandStartEvent(IslandEvent):
     """One island has come up and is about to initialise its population."""
 
     type: Literal["island_start"] = "island_start"
@@ -178,7 +191,9 @@ class IslandStartEvent(BaseEvent):
         description="Resolved operator parameters actually in force on this island. Logged per-island because heterogeneous-island configurations are a planned experiment, and a run-level copy would then be wrong.",
     )
     benchmark: str
-    benchmark_params: dict[str, Any] = Field(default_factory=dict)
+    benchmark_params: dict[str, Any] = Field(
+        description="The benchmark's own description of the instance this island searches."
+    )
     genome_encoding: str = Field(description="GenomeEncoding family this island's individuals use.")
     population_size: int
     evaluation_budget: int | None = Field(
@@ -186,7 +201,7 @@ class IslandStartEvent(BaseEvent):
         description="This island's share of the run's evaluation budget; its hard ceiling.",
     )
     island_seed: int = Field(
-        description="The random seed this island actually drew, from OS entropy. Recorded as an observation, not an input: runs are deliberately not reproducible, and there is no configuration field that sets this.",
+        description="The seed this island's generator was created from: derived from the run's `seed` when one is set, otherwise drawn from OS entropy. `numpy.random.default_rng(island_seed)` recreates the island's random stream either way.",
     )
     hostname: str
     pid: int
@@ -206,7 +221,7 @@ class IslandStartEvent(BaseEvent):
     )
 
 
-class IslandEndEvent(BaseEvent):
+class IslandEndEvent(IslandEvent):
     """One island finished (or gave up). Absent for an island that crashed."""
 
     type: Literal["island_end"] = "island_end"
@@ -234,7 +249,7 @@ class IslandEndEvent(BaseEvent):
     )
     control_channel: dict[str, Any] = Field(
         default_factory=dict,
-        description="Control-plane health for this island: failed calls, log records dropped by the network sink, last transport error.",
+        description="Transport health for this island: failed control calls and the last control error, and under `broker` the records Redis had acknowledged before this one, the errors its writer retried past, and the last of them.",
     )
 
 
@@ -260,7 +275,7 @@ class RunEndEvent(BaseEvent):
     )
 
 
-class EvaluationEvent(BaseEvent):
+class EvaluationEvent(IslandEvent):
     """One individual was evaluated. The atomic unit of the whole format."""
 
     type: Literal["evaluation"] = "evaluation"
@@ -293,12 +308,18 @@ class EvaluationEvent(BaseEvent):
     )
     genome_encoding: str
     genome_hash: str = Field(description="128-bit blake2b of the location signature. Always present.")
-    genome_repr: Any | None = Field(
-        default=None, description="Genome body; interpretation depends on genome_repr_mode."
+    genome_repr: Any = Field(
+        description="Genome body, present on every row; interpretation depends on genome_repr_mode."
     )
-    genome_repr_mode: str = Field(
-        default="hashed", description="'hashed' | 'compact' | 'full'. See archipelago_logging.genome."
-    )
+    genome_repr_mode: str = Field(description="'compact' | 'full'. See archipelago_logging.genome.")
+
+    @field_validator("genome_repr")
+    @classmethod
+    def _genome_body_present(cls, value: Any) -> Any:
+        """Reject a row without a genome body: the clustering module positions rows by it."""
+        if value is None or value == "" or (isinstance(value, (list, dict)) and not value):
+            raise ValueError("every evaluation row must carry a genome body")
+        return value
     genome_precision_decimals: int | None = Field(
         default=None,
         description="Rounding used to form the signature for real encodings. Hashes from runs with different precision are NOT comparable.",
@@ -316,7 +337,7 @@ class EvaluationEvent(BaseEvent):
     )
 
 
-class GenerationEndEvent(BaseEvent):
+class GenerationEndEvent(IslandEvent):
     """Per-generation summary so downstream need not replay every evaluation."""
 
     type: Literal["generation_end"] = "generation_end"
@@ -359,7 +380,7 @@ class GenerationEndEvent(BaseEvent):
     migrants_sent_this_generation: int = 0
 
 
-class MigrationSendEvent(BaseEvent):
+class MigrationSendEvent(IslandEvent):
     """Migrants left the source island. Emitted by the source island."""
 
     type: Literal["migration_send"] = "migration_send"
@@ -380,7 +401,7 @@ class MigrationSendEvent(BaseEvent):
     )
 
 
-class MigrationArriveEvent(BaseEvent):
+class MigrationArriveEvent(IslandEvent):
     """Migrants were integrated into the destination island's population."""
 
     type: Literal["migration_arrive"] = "migration_arrive"
@@ -411,7 +432,7 @@ class MigrationArriveEvent(BaseEvent):
 
 
 class DiagnosticEvent(BaseEvent):
-    """Free-form harness diagnostics kept in-band with the run."""
+    """Free-form Runner diagnostics kept in-band with the run."""
 
     type: Literal["diagnostic"] = "diagnostic"
     level: str = DiagnosticLevel.INFO.value
@@ -450,175 +471,4 @@ _ADAPTER: TypeAdapter[Any] = TypeAdapter(AnyEvent)
 
 def parse_event(record: dict[str, Any]) -> BaseEvent:
     """Validate one decoded JSON object into its typed event model."""
-    if record.get("type") not in EVENT_MODELS:
-        return BaseEvent.model_validate(record)
     return _ADAPTER.validate_python(record)
-
-
-PARENT_ID_SEPARATOR = ";"
-
-EVALUATION_CSV_COLUMNS: tuple[str, ...] = (
-    "run_id",
-    "island_id",
-    "seq",
-    "eval_index",
-    "generation",
-    "t_wall",
-    "t_mono_ns",
-    "individual_id",
-    "parent_ids",
-    "operator",
-    "fitness",
-    "objective",
-    "feasible",
-    "constraint_violation",
-    "is_island_best",
-    "genome_encoding",
-    "genome_hash",
-    "genome_repr",
-    "genome_repr_mode",
-    "genome_precision_decimals",
-    "genome_dim",
-    "origin_island",
-    "origin_individual_id",
-)
-
-EVALUATION_CSV_HEADER = ",".join(EVALUATION_CSV_COLUMNS)
-
-
-def evaluation_csv_schema() -> dict[str, Any]:
-    """Sidecar describing ``evaluations.csv``, written once."""
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "record_type": EventType.EVALUATION.value,
-        "columns": list(EVALUATION_CSV_COLUMNS),
-        "conventions": {
-            "null": "empty field",
-            "boolean": "1 for true, 0 for false, empty for unknown",
-            "parent_ids": f"{PARENT_ID_SEPARATOR!r}-separated list; empty for an initial individual",
-            "genome_repr": (
-                "interpretation depends on genome_repr_mode: absent for 'hashed', a base64 "
-                "string for 'compact' (see archipelago_logging.decode_compact), JSON for "
-                "'full'. Composite encodings (real_vector_velocity, real_vector_sigma) are "
-                "JSON objects in both non-hashed modes."
-            ),
-            "quoting": "RFC 4180 (csv.QUOTE_MINIMAL); read with Python's csv module or pandas",
-        },
-        "note": (
-            "Every other event type for this run is in run.jsonl. Join on run_id, "
-            "island_id and generation."
-        ),
-    }
-
-
-def _csv_scalar(value: Any) -> str:
-    """Render one field. ``None`` becomes an empty string; booleans become 1/0."""
-    if value is None:
-        return ""
-    if isinstance(value, bool):
-        return "1" if value else "0"
-    return str(value)
-
-
-def _csv_genome_repr(value: Any) -> str:
-    """Render ``genome_repr``, which is a string, a JSON structure, or absent."""
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    return json.dumps(value, separators=(",", ":"))
-
-
-def format_evaluation_csv_row(event: "EvaluationEvent") -> str:
-    """Serialise one evaluation to a single RFC 4180 CSV line (no trailing newline)."""
-    values = {
-        "run_id": event.run_id,
-        "island_id": event.island_id,
-        "seq": event.seq,
-        "eval_index": event.eval_index,
-        "generation": event.generation,
-        "t_wall": f"{event.t_wall:.6f}",
-        "t_mono_ns": event.t_mono_ns,
-        "individual_id": event.individual_id,
-        "parent_ids": PARENT_ID_SEPARATOR.join(event.parent_ids or ()),
-        "operator": event.operator,
-        "fitness": repr(float(event.fitness)),
-        "objective": "" if event.objective is None else repr(float(event.objective)),
-        "feasible": event.feasible,
-        "constraint_violation": event.constraint_violation,
-        "is_island_best": event.is_island_best,
-        "genome_encoding": event.genome_encoding,
-        "genome_hash": event.genome_hash,
-        "genome_repr": _csv_genome_repr(event.genome_repr),
-        "genome_repr_mode": event.genome_repr_mode,
-        "genome_precision_decimals": event.genome_precision_decimals,
-        "genome_dim": event.genome_dim,
-        "origin_island": event.origin_island,
-        "origin_individual_id": event.origin_individual_id,
-    }
-    buffer = io.StringIO()
-    writer = csv.writer(buffer, lineterminator="")
-    writer.writerow(
-        [
-            values[column] if column == "genome_repr" else _csv_scalar(values[column])
-            for column in EVALUATION_CSV_COLUMNS
-        ]
-    )
-    return buffer.getvalue()
-
-
-def _csv_int(text: str) -> int | None:
-    return int(text) if text != "" else None
-
-
-def _csv_float(text: str) -> float | None:
-    return float(text) if text != "" else None
-
-
-def _csv_bool(text: str) -> bool | None:
-    return None if text == "" else text == "1"
-
-
-def evaluation_from_csv_row(row: dict[str, str]) -> EvaluationEvent:
-    """Rebuild an :class:`EvaluationEvent` from one parsed CSV row."""
-    representation: Any = row.get("genome_repr") or None
-    mode = row.get("genome_repr_mode") or "hashed"
-    if representation is not None and mode != "compact":
-        try:
-            representation = json.loads(representation)
-        except (json.JSONDecodeError, TypeError):
-            pass
-    elif representation is not None and representation.startswith("{"):
-        try:
-            representation = json.loads(representation)
-        except json.JSONDecodeError:
-            pass
-
-    parents = row.get("parent_ids") or ""
-    return EvaluationEvent(
-        schema_version=SCHEMA_VERSION,
-        run_id=row["run_id"],
-        emitter=f"island:{row['island_id']}",
-        seq=int(row["seq"]),
-        t_wall=float(row["t_wall"]),
-        t_mono_ns=int(row["t_mono_ns"]),
-        island_id=_csv_int(row.get("island_id", "")),
-        generation=_csv_int(row.get("generation", "")),
-        individual_id=row["individual_id"],
-        parent_ids=[part for part in parents.split(PARENT_ID_SEPARATOR) if part],
-        operator=row["operator"],
-        fitness=float(row["fitness"]),
-        objective=_csv_float(row.get("objective", "")),
-        feasible=_csv_bool(row.get("feasible", "")),
-        constraint_violation=_csv_float(row.get("constraint_violation", "")),
-        is_island_best=_csv_bool(row.get("is_island_best", "")),
-        eval_index=int(row["eval_index"]),
-        genome_encoding=row["genome_encoding"],
-        genome_hash=row["genome_hash"],
-        genome_repr=representation,
-        genome_repr_mode=mode,
-        genome_precision_decimals=_csv_int(row.get("genome_precision_decimals", "")),
-        genome_dim=_csv_int(row.get("genome_dim", "")),
-        origin_island=_csv_int(row.get("origin_island", "")),
-        origin_individual_id=row.get("origin_individual_id") or None,
-    )

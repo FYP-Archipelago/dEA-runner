@@ -3,8 +3,6 @@
 # score well by drifting toward zero. The shift is the official CEC2017 vector,
 # read from a data file: there is no generated substitute, so the problem is
 # identical in every run of this config.
-#
-#   python scripts/fetch_datasets.py --only cec
 
 description: "DE/rand/1/bin, 5 islands, CEC-shifted Rastrigin 10D, ring migration."
 
@@ -46,30 +44,13 @@ migration:
   phase_jitter: 3      # break the artificial lockstep between islands
 
 logging:
-  output_dir: runs
   genome_mode: compact
   genome_precision_decimals: 4
-  # Live TCP stream of the run's COMPLETE output to an external consumer:
-  # every run.jsonl event, every evaluations.csv row, and the final summary.
-  # Receive it with:
-  #   python scripts/stream_receiver.py --port 9900
-  # The stream comes from the master, not the islands. Running `cli run` from a
-  # shell keeps the master on the host even under this backend -- only the
-  # workers are containers -- so 127.0.0.1 is correct. Set host.docker.internal
-  # only when the master itself runs in a container (docker/Dockerfile.master).
-  # A missing listener degrades the stream only: the run and its files are fine.
-  live_stream:
-    enabled: false
-    host: 127.0.0.1
-    port: 9900
-
-execution:
-  backend: docker      # the default; each island gets its own container
 
 docker:
-  image: archipelago-worker:latest
+  image: archipelago-island:latest
   build: true          # built automatically if missing or older than the sources
-  dockerfile: docker/Dockerfile.worker
+  dockerfile: docker/Dockerfile.island
   cpus: 1.0
   memory: 2g
   # Docker's builder VM may not inherit the host resolver, which shows up as pip

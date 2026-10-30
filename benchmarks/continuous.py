@@ -28,7 +28,6 @@ class _AnalyticFunction(ContinuousProblem):
 
     def evaluate(self, genome: np.ndarray) -> ProblemEvaluation:
         """Score one point against the analytic function."""
-        self._evaluations += 1
         value = float(self._function(np.asarray(genome, dtype=float)))
         return ProblemEvaluation(fitness=value)
 
@@ -235,7 +234,6 @@ class ShiftedRotated(ContinuousProblem):
 
     def evaluate(self, genome: np.ndarray) -> ProblemEvaluation:
         """Score one point through the shift and rotation."""
-        self._evaluations += 1
         x = np.asarray(genome, dtype=float)
         value = float(self._base._function(self.rotation @ (x - self.shift)))
         return ProblemEvaluation(fitness=value)

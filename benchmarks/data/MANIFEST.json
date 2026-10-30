@@ -99,6 +99,6 @@
       "url": "https://raw.githubusercontent.com/mastqe/tsplib/master/kroA100.tsp"
     }
   },
-  "note": "Provenance for the third-party benchmark instances under benchmarks/data/. Regenerate with scripts/fetch_datasets.py; verify with --verify.",
+  "note": "Provenance for the third-party benchmark instances under benchmarks/data/: the source URL, size and SHA-256 of each file. tests/test_datasets.py verifies every checksum.",
   "schema": 1
 }

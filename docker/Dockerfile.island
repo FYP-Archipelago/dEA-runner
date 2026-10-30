@@ -1,6 +1,6 @@
-# Island worker image.
+# Island image: one container per island.
 # Build:
-#   docker build -f docker/Dockerfile.worker -t archipelago-worker:latest .
+#   docker build -f docker/Dockerfile.island -t archipelago-island:latest .
 #
 # The master builds it automatically when docker.build is true.
 
@@ -15,22 +15,21 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /archipelago
 
-COPY requirements-worker.txt ./
-RUN pip install --no-cache-dir -r requirements-worker.txt
+COPY requirements-island.txt ./
+RUN pip install --no-cache-dir -r requirements-island.txt
 
 COPY archipelago_logging/ ./archipelago_logging/
 COPY algorithms/ ./algorithms/
 COPY benchmarks/ ./benchmarks/
 COPY orchestrator/ ./orchestrator/
 
-# Run as an unprivileged user. The run's output directory is bind-mounted from
-# the host, so this uid must be able to write there; the master creates the
-# directory before launching any container.
+# Run as an unprivileged user: an island needs no file system access beyond its code.
+# Its config arrives in the ISLAND_CONFIG environment variable, its records go to
+# Redis, and its result goes back to the master over the control channel.
 RUN useradd --create-home --uid 1000 archipelago \
     && chown -R archipelago:archipelago /archipelago
 USER archipelago
 
-# Overridden by the master with the island id, run id, config path and control
-# address. Present so `docker run archipelago-worker:latest --help` is useful.
-ENTRYPOINT ["python", "-m", "orchestrator.worker"]
+# Overridden by the master with the island id, run id and control address. Present so `docker run archipelago-island:latest --help` is useful.
+ENTRYPOINT ["python", "-m", "orchestrator.island"]
 CMD ["--help"]

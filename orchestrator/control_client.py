@@ -1,4 +1,4 @@
-"""Worker-side client for the master's control channel."""
+"""Island-side client for the master's control channel."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 
 from archipelago_logging import ClockOffset, measure_clock_offset
 
-from .protocol import Op, ProtocolError, Role, recv_message, send_message
+from .protocol import Op, ProtocolError, recv_message, send_message
 
 __all__ = ["ControlClient"]
 
@@ -45,7 +45,7 @@ class ControlClient:
 
 
     def connect(self) -> bool:
-        """Connect and perform the role handshake, retrying while the master starts."""
+        """Connect and introduce this island, retrying while the master starts."""
         deadline = time.monotonic() + self.connect_timeout
         attempt = 0
         while time.monotonic() < deadline and attempt <= self.connect_retries:
@@ -59,7 +59,6 @@ class ControlClient:
                 send_message(
                     sock,
                     {
-                        "role": Role.CONTROL,
                         "run_id": self.run_id,
                         "island_id": self.island_id,
                         "node_id": self.node_id,
@@ -182,6 +181,6 @@ class ControlClient:
         )
         return bool(response and response.get("stop"))
 
-    def bye(self, *, generation: int, evaluations: int) -> None:
-        """Tell the master this island finished cleanly."""
-        self.call(Op.BYE, generation=generation, evaluations=evaluations)
+    def bye(self, *, generation: int, evaluations: int, result: dict[str, Any]) -> None:
+        """Tell the master this island is done, and hand it the island's result."""
+        self.call(Op.BYE, generation=generation, evaluations=evaluations, result=result)

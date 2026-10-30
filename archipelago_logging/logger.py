@@ -16,12 +16,12 @@ from .events import (
     IslandStartEvent,
     MigrationArriveEvent,
     MigrationSendEvent,
+    RecordKind,
     RunEndEvent,
     RunStartEvent,
-    format_evaluation_csv_row,
 )
 from .genome import EncodedGenome
-from .sinks import NullSink, Sink
+from .sinks import Sink
 from .version import SCHEMA_VERSION
 
 __all__ = ["EventLogger"]
@@ -34,23 +34,19 @@ class EventLogger:
         self,
         run_id: str,
         emitter: str,
-        sink: Sink | None = None,
+        sink: Sink,
         *,
-        evaluation_sink: Sink | None = None,
         island_id: int | None = None,
         node_id: str | None = None,
-        validate: bool = True,
     ) -> None:
         self.run_id = run_id
         self.emitter = emitter
-        self.sink: Sink = sink if sink is not None else NullSink()
-        self.evaluation_sink: Sink | None = evaluation_sink
+        self.sink = sink
         self.island_id = island_id
         self.node_id = node_id
-        self.validate = validate
 
         self._seq = 0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._eval_index = 0
         self._counts: dict[str, int] = {}
 
@@ -71,16 +67,12 @@ class EventLogger:
         return dict(self._counts)
 
     def flush(self) -> None:
-        """Flush the underlying sinks."""
+        """Return once every record emitted so far has been delivered."""
         self.sink.flush()
-        if self.evaluation_sink is not None:
-            self.evaluation_sink.flush()
 
     def close(self) -> None:
-        """Flush and close the underlying sinks."""
+        """Flush and close the sink."""
         self.sink.close()
-        if self.evaluation_sink is not None:
-            self.evaluation_sink.close()
 
     def __enter__(self) -> "EventLogger":
         return self
@@ -101,16 +93,13 @@ class EventLogger:
             fields["seq"] = self._seq
             fields["t_wall"] = wall_now()
             fields["t_mono_ns"] = mono_ns()
-            self._seq += 1
 
-            event = model(**fields) if self.validate else model.model_construct(**fields)
+            event = model(**fields)
+            self._seq += 1
             type_name = getattr(event, "type", model.__name__)
             self._counts[type_name] = self._counts.get(type_name, 0) + 1
 
-            if self.evaluation_sink is not None and isinstance(event, EvaluationEvent):
-                self.evaluation_sink.write(format_evaluation_csv_row(event))
-            else:
-                self.sink.write(event.to_json_line())
+            self.sink.write(event.to_json_line(), RecordKind.of(event.type))
 
         return event
 
@@ -145,25 +134,24 @@ class EventLogger:
     ) -> EvaluationEvent:
         """Emit one ``evaluation`` record."""
         with self._lock:
-            eval_index = self._eval_index
+            event = self.emit(
+                EvaluationEvent,
+                individual_id=individual_id,
+                parent_ids=list(parent_ids or []),
+                operator=operator,
+                fitness=float(fitness),
+                generation=generation,
+                eval_index=self._eval_index,
+                genome_encoding=genome.encoding.value,
+                genome_hash=genome.genome_hash,
+                genome_repr=genome.genome_repr,
+                genome_repr_mode=genome.genome_repr_mode.value,
+                genome_precision_decimals=genome.precision_decimals,
+                genome_dim=genome.dim,
+                **fields,
+            )
             self._eval_index += 1
-
-        return self.emit(
-            EvaluationEvent,
-            individual_id=individual_id,
-            parent_ids=list(parent_ids or []),
-            operator=operator,
-            fitness=float(fitness),
-            generation=generation,
-            eval_index=eval_index,
-            genome_encoding=genome.encoding.value,
-            genome_hash=genome.genome_hash,
-            genome_repr=genome.genome_repr,
-            genome_repr_mode=genome.genome_repr_mode.value,
-            genome_precision_decimals=genome.precision_decimals,
-            genome_dim=genome.dim,
-            **fields,
-        )
+        return event
 
     def generation_end(self, **fields: Any) -> GenerationEndEvent:
         """Emit one generation's summary."""
@@ -185,7 +173,7 @@ class EventLogger:
         level: str = DiagnosticLevel.INFO.value,
         **context: Any,
     ) -> DiagnosticEvent:
-        """Emit a free-form harness note, in band with the run."""
+        """Emit a free-form Runner note, in band with the run."""
         return self.emit(
             DiagnosticEvent, message=message, level=level, context=context
         )

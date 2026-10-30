@@ -31,7 +31,6 @@ class Primitive:
     name: str
     arity: int
     call: Callable[..., np.ndarray]
-    infix: str | None = None
 
 
 def _protected_division(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -56,10 +55,10 @@ def _protected_exp(a: np.ndarray) -> np.ndarray:
 
 
 PRIMITIVES: dict[str, Primitive] = {
-    "add": Primitive("add", 2, lambda a, b: a + b, "+"),
-    "sub": Primitive("sub", 2, lambda a, b: a - b, "-"),
-    "mul": Primitive("mul", 2, lambda a, b: a * b, "*"),
-    "div": Primitive("div", 2, _protected_division, "/"),
+    "add": Primitive("add", 2, lambda a, b: a + b),
+    "sub": Primitive("sub", 2, lambda a, b: a - b),
+    "mul": Primitive("mul", 2, lambda a, b: a * b),
+    "div": Primitive("div", 2, _protected_division),
     "neg": Primitive("neg", 1, lambda a: -a),
     "sin": Primitive("sin", 1, np.sin),
     "cos": Primitive("cos", 1, np.cos),

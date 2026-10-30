@@ -306,7 +306,6 @@ class GeneticAlgorithm(Algorithm):
             raise ValueError(
                 f"unknown {representation} crossover {crossover_name!r}; available: {sorted(table)}"
             )
-        self._crossover_name = crossover_name
         self._crossover = table[crossover_name]
 
         if representation == "permutation":

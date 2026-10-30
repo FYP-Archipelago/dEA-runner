@@ -1,8 +1,6 @@
 # Tree GP on real data: the UCI Yacht Hydrodynamics dataset, 308 rows and six
 # physical measurements predicting residuary resistance.
 #
-#   python scripts/fetch_datasets.py --only regression
-#
 # Real data rather than a synthetic target changes the problem in ways worth
 # having in the dataset: there is no exact expression to find, so fitness
 # plateaus at a non-zero error and the stagnation rule (rather than a target
@@ -46,29 +44,12 @@ migration:
   replacement: worst
 
 logging:
-  output_dir: runs
   genome_mode: full
-  # Live TCP stream of the run's COMPLETE output to an external consumer:
-  # every run.jsonl event, every evaluations.csv row, and the final summary.
-  # Receive it with:
-  #   python scripts/stream_receiver.py --port 9900
-  # The stream comes from the master, not the islands. Running `cli run` from a
-  # shell keeps the master on the host even under this backend -- only the
-  # workers are containers -- so 127.0.0.1 is correct. Set host.docker.internal
-  # only when the master itself runs in a container (docker/Dockerfile.master).
-  # A missing listener degrades the stream only: the run and its files are fine.
-  live_stream:
-    enabled: false
-    host: 127.0.0.1
-    port: 9900
-
-execution:
-  backend: docker      # the default; each island gets its own container
 
 docker:
-  image: archipelago-worker:latest
+  image: archipelago-island:latest
   build: true          # built automatically if missing or older than the sources
-  dockerfile: docker/Dockerfile.worker
+  dockerfile: docker/Dockerfile.island
   cpus: 1.0
   memory: 2g
   # Docker's builder VM may not inherit the host resolver, which shows up as pip

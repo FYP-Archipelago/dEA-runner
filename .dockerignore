@@ -8,3 +8,4 @@ __pycache__/
 docs/
 tests/
 *.egg-info/
+.env

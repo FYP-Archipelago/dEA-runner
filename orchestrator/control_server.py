@@ -1,4 +1,4 @@
-"""Master-side control server: migration broker and log collector."""
+"""Master-side control server: the migration broker."""
 
 from __future__ import annotations
 
@@ -8,9 +8,11 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
-from archipelago_logging import EventLogger, MigrationIdMinter, Sink, wall_now
+from archipelago_logging import EventLogger, MigrationIdMinter, wall_now
 
-from .protocol import Op, ProtocolError, Role, iter_messages, recv_message, send_message
+from .protocol import Op, ProtocolError, iter_messages, recv_message, send_message
+from .redis_stream import BrokerError
+from .seeding import seed_for_broker
 from .topology import Topology
 
 __all__ = ["ControlServer", "IslandStatus", "PendingMigration"]
@@ -48,6 +50,7 @@ class IslandStatus:
     migrations_dispatched: int = 0
     migrations_delivered: int = 0
     migrants_dropped: int = 0
+    result: dict[str, Any] | None = None
 
 
 class ControlServer:
@@ -59,23 +62,22 @@ class ControlServer:
         run_id: str,
         topology: Topology,
         logger: EventLogger,
-        aggregate_sink: Sink | None,
         host: str = "127.0.0.1",
         port: int = 0,
         max_pending_per_island: int = 1000,
         fanout: str = "all",
         evaluation_budget: int | None = None,
-        evaluation_sink: Sink | None = None,
+        seed: int | None = None,
     ) -> None:
         self.run_id = run_id
         self.topology = topology
         self.logger = logger
-        self.aggregate_sink = aggregate_sink
         self.max_pending = max_pending_per_island
         self.fanout = fanout
         self.evaluation_budget = evaluation_budget
-        self.evaluation_sink = evaluation_sink
-        self._rng = random.Random()
+        self._rngs = {
+            island: random.Random(seed_for_broker(seed, island)) for island in topology
+        }
 
         self._lock = threading.RLock()
         self._migration_ids = MigrationIdMinter()
@@ -96,13 +98,6 @@ class ControlServer:
 
         self.total_migration_events = 0
         self.total_migrants = 0
-        self.collected_log_lines = 0
-
-    @property
-    def evaluations_spent(self) -> int:
-        """Evaluations across the archipelago, as last reported by heartbeats."""
-        with self._lock:
-            return sum(status.evaluations for status in self.islands.values())
 
 
     @property
@@ -117,25 +112,18 @@ class ControlServer:
         outer = self
 
         class Handler(socketserver.StreamRequestHandler):
-            """Dispatches one connection by the role in its first line."""
+            """Serves one island's control connection, introduced by its first line."""
 
             timeout = None
             disable_nagle_algorithm = True
 
             def handle(self) -> None:
-                """Read the handshake and route to the matching handler."""
+                """Read the island's introduction, then serve its requests."""
                 try:
                     hello = recv_message(self.rfile)
                 except (ProtocolError, OSError):
                     return
-                role = hello.get("role")
-                island_id = hello.get("island_id")
-                if role == Role.CONTROL:
-                    outer._handle_control(self, int(island_id), hello)
-                elif role == Role.LOG:
-                    outer._handle_log_stream(self, island_id, outer.aggregate_sink)
-                elif role == Role.EVALUATIONS:
-                    outer._handle_log_stream(self, island_id, outer.evaluation_sink)
+                outer._handle_control(self, int(hello["island_id"]), hello)
 
         class Server(socketserver.ThreadingTCPServer):
             """Threaded TCP server, one thread per island connection."""
@@ -161,25 +149,6 @@ class ControlServer:
             self._server_thread.join(timeout=timeout)
 
 
-    def _handle_log_stream(
-        self,
-        handler: socketserver.StreamRequestHandler,
-        island_id: Any,
-        sink: Sink | None,
-    ) -> None:
-        """Append an island's streamed lines to the aggregate the handshake selected."""
-        try:
-            for raw in handler.rfile:
-                line = raw.decode("utf-8", errors="replace").strip()
-                if not line:
-                    continue
-                if sink is not None:
-                    sink.write(line)
-                with self._lock:
-                    self.collected_log_lines += 1
-        except OSError:
-            return
-
     def _handle_control(
         self, handler: socketserver.StreamRequestHandler, island_id: int, hello: dict[str, Any]
     ) -> None:
@@ -199,6 +168,17 @@ class ControlServer:
         finally:
             with self._lock:
                 self.islands[island_id].connected = False
+
+    def _note(self, message: str, **context: Any) -> None:
+        """A diagnostic from a connection thread.
+
+        Dropped if the master's writer has failed or closed: the master's own loop notices a
+        failed writer and ends the run, and nothing may follow ``run_end``.
+        """
+        try:
+            self.logger.diagnostic(message, **context)
+        except (BrokerError, RuntimeError):
+            pass
 
     def _dispatch(self, island_id: int, message: dict[str, Any]) -> dict[str, Any]:
         operation = message.get("op")
@@ -227,7 +207,7 @@ class ControlServer:
             if self.evaluation_budget is not None and spent >= self.evaluation_budget:
                 if not self.stop_requested.is_set():
                     self.stop_requested.set()
-                    self.logger.diagnostic(
+                    self._note(
                         "archipelago evaluation budget reached; asking islands to wind down",
                         evaluation_budget=self.evaluation_budget,
                         evaluations_spent=spent,
@@ -237,6 +217,7 @@ class ControlServer:
             with self._lock:
                 status = self.islands[island_id]
                 status.finished = True
+                status.result = message.get("result")
                 status.generation = int(message.get("generation", status.generation))
                 status.evaluations = int(message.get("evaluations", status.evaluations))
             return {"ok": True}
@@ -256,7 +237,7 @@ class ControlServer:
                 self._round_robin[source_island] = position + 1
                 return [neighbours[position]]
         with self._lock:
-            return [self._rng.choice(neighbours)]
+            return [self._rngs[source_island].choice(neighbours)]
 
     def _handle_migrate(self, source_island: int, message: dict[str, Any]) -> dict[str, Any]:
         migrants = message.get("migrants") or []
@@ -290,7 +271,7 @@ class ControlServer:
                 if len(queue) >= self.max_pending:
                     dropped = queue.pop(0)
                     self.islands[destination].migrants_dropped += len(dropped.migrants)
-                    self.logger.diagnostic(
+                    self._note(
                         "migration queue full; dropped the oldest pending transfer",
                         level="warning",
                         island_id=destination,

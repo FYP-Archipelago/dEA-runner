@@ -4,8 +4,8 @@
 #
 #   python -m orchestrator.cli run --config config/docker_de_sphere.yaml
 #
-# The master builds the worker image itself. To build it by hand instead:
-#   docker build --network=host -f docker/Dockerfile.worker -t archipelago-worker:latest .
+# The master builds the island image itself. To build it by hand instead:
+#   docker build --network=host -f docker/Dockerfile.island -t archipelago-island:latest .
 
 description: "DE on Sphere, 5 islands, one Docker container per island."
 
@@ -33,35 +33,19 @@ migration:
   replacement: worst
 
 logging:
-  output_dir: runs
   genome_mode: compact
-  # Live TCP stream of the run's COMPLETE output to an external consumer:
-  # every run.jsonl event, every evaluations.csv row, and the final summary.
-  # Receive it with:
-  #   python scripts/stream_receiver.py --port 9900
-  # The stream comes from the master, not the islands. Running `cli run` from a
-  # shell keeps the master on the host even under this backend -- only the
-  # workers are containers -- so 127.0.0.1 is correct. Set host.docker.internal
-  # only when the master itself runs in a container (docker/Dockerfile.master).
-  # A missing listener degrades the stream only: the run and its files are fine.
-  live_stream:
-    enabled: false
-    host: 127.0.0.1
-    port: 9900
 
 execution:
-  backend: docker      # the default; each island gets its own container
-  # The master binds 0.0.0.0 automatically under this backend, and workers reach
-  # it at host.docker.internal (mapped to host-gateway on every container).
-  connect_timeout_seconds: 120.0   # containers start slower than subprocesses
+  # The master binds 0.0.0.0 automatically. Islands reach it over the run's own
+  # network when the master is a container, or over the host network when it is not.
+  connect_timeout_seconds: 120.0   # headroom for slow container starts
 
 docker:
-  image: archipelago-worker:latest
+  image: archipelago-island:latest
   build: true          # built automatically if missing or older than the sources
-  dockerfile: docker/Dockerfile.worker
+  dockerfile: docker/Dockerfile.island
   cpus: 1.0
   memory: 2g
-  auto_remove: true    # set false to keep a container around for `docker logs`
   # Docker's builder VM may not inherit the host resolver, which shows up as pip
   # being unable to reach PyPI. "host" fixes it and is harmless otherwise.
   build_network: host

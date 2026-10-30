@@ -33,9 +33,9 @@ def resolve_instance_path(path: str | Path, *, what: str = "instance file") -> P
     resolved = candidate if candidate.is_absolute() else REPOSITORY_ROOT / candidate
     if not resolved.exists():
         raise FileNotFoundError(
-            f"{what} not found: {resolved}. Instance files are required -- this harness "
-            f"does not generate substitutes. Fetch the shipped datasets with:  "
-            f"python scripts/fetch_datasets.py"
+            f"{what} not found: {resolved}. Instance files are required -- the Runner "
+            f"does not generate substitutes. The shipped instances are committed under "
+            f"benchmarks/data/; restore a missing one from git."
         )
     return resolved
 
@@ -73,7 +73,6 @@ class Problem(ABC):
 
     def __init__(self, **params: Any) -> None:
         self.params: dict[str, Any] = dict(params)
-        self._evaluations = 0
 
 
     @abstractmethod
@@ -85,10 +84,6 @@ class Problem(ABC):
         """Sample one uniformly random legal point in the search space."""
 
 
-    def repair(self, genome: Any) -> Any:
-        """Project a genome back into the legal search space."""
-        return genome
-
     def is_better(self, a: float, b: float) -> bool:
         """``True`` if fitness ``a`` is strictly better than ``b``."""
         return a > b if self.maximising else a < b
@@ -96,11 +91,6 @@ class Problem(ABC):
     def worst_possible(self) -> float:
         """The identity element for "best so far" accumulation."""
         return float("-inf") if self.maximising else float("inf")
-
-    @property
-    def evaluation_count(self) -> int:
-        """Objective evaluations performed by this instance."""
-        return self._evaluations
 
     def describe(self) -> dict[str, Any]:
         """JSON-serialisable description, logged in ``island_start.benchmark_params``."""
@@ -156,10 +146,6 @@ class ContinuousProblem(Problem):
     def random_solution(self, rng: np.random.Generator) -> np.ndarray:
         """Draw a point uniformly from the box."""
         return rng.uniform(self.lower, self.upper)
-
-    def repair(self, genome: np.ndarray) -> np.ndarray:
-        """Clip to the box. Standard practice for bound-constrained benchmarks."""
-        return np.clip(genome, self.lower, self.upper)
 
     @property
     def range(self) -> np.ndarray:

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Regenerate the field reference and worked examples in ``docs/LOGGING_FORMAT.md``."""
+"""Regenerate the field reference and worked examples in ``docs/LOGGING_FORMAT.md``.
+
+The examples come from a real run, so regenerating them needs Docker, an island image built
+from the current source, and a Redis the islands can reach; ``--fields-only`` and ``--check``
+need none of them.
+"""
 
 from __future__ import annotations
 
@@ -16,10 +21,8 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from archipelago_logging.events import (
-    EVALUATION_CSV_COLUMNS,
     EVENT_MODELS,
     BaseEvent,
-    evaluation_csv_schema,
 )
 from archipelago_logging.version import SCHEMA_VERSION
 
@@ -94,102 +97,57 @@ def _model_summary(model: type[BaseEvent]) -> str:
     return re.sub(r"\s+", " ", paragraph).strip()
 
 
-def build_csv_column_table() -> str:
-    """Column order of ``evaluations.csv``, in file order."""
-    fields = EVENT_MODELS["evaluation"].model_fields
-    lines = [
-        "| # | Column | Type | Meaning |",
-        "| --- | --- | --- | --- |",
-    ]
-    for index, column in enumerate(EVALUATION_CSV_COLUMNS):
-        field = fields.get(column)
-        if field is not None:
-            type_name = _render_type(field.annotation).replace("|", "\\|")
-            description = re.sub(r"\s+", " ", (field.description or "").strip())
-        else:
-            envelope = BaseEvent.model_fields[column]
-            type_name = _render_type(envelope.annotation).replace("|", "\\|")
-            description = re.sub(r"\s+", " ", (envelope.description or "").strip())
-        lines.append(f"| {index} | `{column}` | `{type_name}` | {description.replace('|', chr(92) + '|') or '—'} |")
-
-    conventions = evaluation_csv_schema()["conventions"]
-    lines.append("")
-    lines.append("Encoding conventions, also written into `evaluations.schema.json`:")
-    lines.append("")
-    for key, value in conventions.items():
-        lines.append(f"* **`{key}`** — {value}")
-    return "\n".join(lines) + "\n"
-
-
 def build_field_reference() -> str:
-    """Render the CSV columns, the envelope, and every event's fields."""
+    """Render the envelope and every event's fields."""
     parts: list[str] = [
-        "### `evaluations.csv` columns\n",
-        "The CSV stream. Column order is fixed by "
-        "`archipelago_logging.EVALUATION_CSV_COLUMNS` and is part of the contract: "
-        "a consumer may read it positionally.\n",
-        build_csv_column_table(),
-        "\n### The JSON Lines envelope\n",
-        "Present on **every** record in `run.jsonl`, in this order.\n",
+        "### The envelope\n",
+        "Present on **every** record, in this order.\n",
         _table(_field_rows(BaseEvent, skip_envelope=False)),
     ]
     for type_name in EVENT_ORDER:
         model = EVENT_MODELS[type_name]
         parts.append(f"\n### `{type_name}`\n")
         parts.append(f"{_model_summary(model)}\n")
-        if type_name == "evaluation":
-            parts.append(
-                "_Written as a CSV row, not a JSON object; the columns above are the "
-                "physical form. The fields below are the same data as the reader "
-                "returns it._\n"
-            )
         parts.append(_table(_field_rows(model, skip_envelope=True)))
     return "\n".join(parts)
 
 
-def _example_records() -> dict[str, dict[str, Any]]:
+def _example_records(image: str, broker_url: str) -> dict[str, list[dict[str, Any]]]:
     """Capture one real record of each type by running a tiny archipelago."""
-    import shutil
-    import tempfile
-
-    from archipelago_logging import iter_raw
     from orchestrator.config import RunConfig
     from orchestrator.master import Master
+    from orchestrator.redis_stream import read_stream
 
-    workspace = Path(tempfile.mkdtemp(prefix="archipelago-docs-"))
-    try:
-        config = RunConfig(
-            algorithm="de",
-            benchmark="sphere",
-            benchmark_params={"dimension": 3},
-            evaluation_budget=320,
-            target_generations=8,
-            num_islands=4,
-            description="documentation example run.",
-            termination={"stagnation_generations": 0, "max_generations": 50},
-            migration={
-                "topology": "ring",
-                "interval": 2,
-                "num_migrants": 2,
-                "selection": "best",
-                "replacement": "worst",
-            },
-            logging={"output_dir": str(workspace)},
-            execution={"backend": "local"},
-        )
-        summary = Master(config, repository_root=REPOSITORY_ROOT).run()
+    config = RunConfig(
+        algorithm="de",
+        benchmark="sphere",
+        benchmark_params={"dimension": 3},
+        evaluation_budget=320,
+        target_generations=8,
+        num_islands=4,
+        description="documentation example run.",
+        termination={"stagnation_generations": 0, "max_generations": 50},
+        migration={
+            "topology": "ring",
+            "interval": 2,
+            "num_migrants": 2,
+            "selection": "best",
+            "replacement": "worst",
+        },
+        docker={"image": image, "build": False},
+        broker={"url": broker_url},
+    )
+    summary = Master(config, repository_root=REPOSITORY_ROOT).run()
 
-        examples: dict[str, dict[str, Any]] = {}
-        for record in iter_raw(summary.aggregate_log):
-            examples.setdefault(record["type"], record)
+    examples: dict[str, list[dict[str, Any]]] = {}
+    for record in read_stream(broker_url, summary.stream_key):
+        examples.setdefault(record["type"], []).append(record)
 
-        global _CSV_EXAMPLE
-        csv_lines = summary.evaluations_csv.read_text().splitlines()
-        _CSV_EXAMPLE = (csv_lines[0], csv_lines[1], csv_lines[-1])
-
-        return examples
-    finally:
-        shutil.rmtree(workspace, ignore_errors=True)
+    evaluations = examples.get("evaluation", [])
+    with_parents = next((record for record in evaluations if record.get("parent_ids")), None)
+    examples["evaluation"] = [evaluations[0]] + ([with_parents] if with_parents else [])
+    return {type_name: found[:2] if type_name == "evaluation" else found[:1]
+            for type_name, found in examples.items()}
 
 
 def _truncate_for_display(record: dict[str, Any]) -> dict[str, Any]:
@@ -216,27 +174,24 @@ def _truncate_for_display(record: dict[str, Any]) -> dict[str, Any]:
     return shown
 
 
-_CSV_EXAMPLE: tuple[str, str, str] | None = None
-
-
-def build_examples(examples: dict[str, dict[str, Any]]) -> str:
-    """Render one real record of each type as a fenced example."""
+def build_examples(examples: dict[str, list[dict[str, Any]]]) -> str:
+    """Render real records of each type as fenced examples."""
     parts: list[str] = []
-    if _CSV_EXAMPLE is not None:
-        header, first, last = _CSV_EXAMPLE
-        parts.append(
-            "\n#### `evaluations.csv`\n\nThe header and two real rows -- an initial "
-            "individual (no parents) and a later one:\n\n"
-            f"```csv\n{header}\n{first}\n{last}\n```\n"
-        )
     for type_name in EVENT_ORDER:
-        if type_name == "evaluation":
+        records = examples.get(type_name)
+        if not records:
             continue
-        record = examples.get(type_name)
-        if record is None:
-            continue
-        rendered = json.dumps(_truncate_for_display(record), indent=2)
-        parts.append(f"\n#### `{type_name}`\n\n```json\n{rendered}\n```\n")
+        intro = (
+            "Two real records: an initial individual, which has no parents, and a later "
+            "one.\n\n"
+            if type_name == "evaluation" and len(records) > 1
+            else ""
+        )
+        rendered = "\n".join(
+            f"```json\n{json.dumps(_truncate_for_display(record), indent=2)}\n```"
+            for record in records
+        )
+        parts.append(f"\n#### `{type_name}`\n\n{intro}{rendered}\n")
     return "\n".join(parts)
 
 
@@ -249,13 +204,13 @@ def _replace_region(text: str, begin: str, end: str, replacement: str) -> str:
     return pattern.sub(f"{begin}\n{replacement}\n{end}", text)
 
 
-def render(current: str) -> str:
+def render(current: str, image: str, broker_url: str) -> str:
     """Replace both generated regions in the document."""
     updated = _replace_region(
         current, FIELD_REFERENCE_BEGIN, FIELD_REFERENCE_END, build_field_reference()
     )
     updated = _replace_region(
-        updated, EXAMPLES_BEGIN, EXAMPLES_END, build_examples(_example_records())
+        updated, EXAMPLES_BEGIN, EXAMPLES_END, build_examples(_example_records(image, broker_url))
     )
     return updated
 
@@ -274,15 +229,19 @@ def main() -> int:
         help="Regenerate only the field tables; do not execute a run for examples. "
         "The examples are the slow part, and they only change when a model does.",
     )
+    parser.add_argument(
+        "--image",
+        default="archipelago-island:latest",
+        help="Island image for the example run. It must already exist and be current.",
+    )
+    parser.add_argument(
+        "--broker-url",
+        default="redis://127.0.0.1:6379/0",
+        help="Redis for the example run; the islands use host networking, so a local one works.",
+    )
     args = parser.parse_args()
 
     current = DOCUMENT.read_text(encoding="utf-8")
-    if args.fields_only:
-        updated = _replace_region(
-            current, FIELD_REFERENCE_BEGIN, FIELD_REFERENCE_END, build_field_reference()
-        )
-    else:
-        updated = render(current)
 
     if args.check:
         expected = _replace_region(
@@ -299,6 +258,12 @@ def main() -> int:
         print(f"{DOCUMENT} is current (schema {SCHEMA_VERSION}).")
         return 0
 
+    if args.fields_only:
+        updated = _replace_region(
+            current, FIELD_REFERENCE_BEGIN, FIELD_REFERENCE_END, build_field_reference()
+        )
+    else:
+        updated = render(current, args.image, args.broker_url)
     DOCUMENT.write_text(updated, encoding="utf-8")
     print(f"Regenerated {DOCUMENT} for schema {SCHEMA_VERSION}.")
     return 0

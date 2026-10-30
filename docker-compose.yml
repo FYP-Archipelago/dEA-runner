@@ -1,0 +1,80 @@
+# The local stack: Redis, the master, and a dummy Worker Pool worker that prints every
+# record as it lands in Redis.
+#
+#   cp .env.example .env          # set REDIS_PASSWORD and RUN_CONFIGS
+#   docker compose up -d --build
+#   docker compose logs -f dummy-worker
+#
+# The master runs every config in RUN_CONFIGS, one after another, then exits; Redis and
+# the dummy worker keep running. Redis keeps everything in memory: stopping it (stop,
+# restart, down, or Ctrl+C on an attached `up`) deletes every stream. More runs, and
+# checking one:
+#   docker compose run --rm master run --config config/ga_tsp.yaml config/es_schwefel.yaml
+#   docker compose run --rm master verify-log <run id>
+#
+# The master creates each run's islands itself, as sibling containers through the
+# mounted Docker socket, and connects them to this stack's network, so they reach Redis
+# as `redis` too.
+
+name: archipelago
+
+services:
+  redis:
+    image: redis:7-alpine
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env (see .env.example)}
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"
+
+  master:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.master
+      network: host
+    image: archipelago-master:latest
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config:/archipelago/config:ro
+    environment:
+      ARCHIPELAGO_BROKER__URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      ARCHIPELAGO_DOCKER__BUILD_NETWORK: host
+      RUN_CONFIGS: ${RUN_CONFIGS:-config/docker_de_sphere.yaml}
+    # With no arguments, run every config in RUN_CONFIGS; otherwise pass the arguments to
+    # the CLI unchanged (docker compose run --rm master verify-log <run id>).
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'if [ "$$#" -eq 0 ]; then set -- run --config $$RUN_CONFIGS; fi; exec python -m orchestrator.cli "$$@"'
+      - master
+    restart: "no"
+
+  dummy-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dummy-worker
+      network: host
+    image: archipelago-dummy-worker:latest
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    restart: unless-stopped

@@ -1,9 +1,8 @@
-"""The master: spins up islands, brokers migration, aggregates logs, reports."""
+"""The master: spins up islands, brokers migration, writes its own records, reports."""
 
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import platform
 import time
@@ -11,31 +10,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from archipelago_logging import (
-    EVALUATION_CSV_COLUMNS,
-    EVALUATION_CSV_HEADER,
-    CsvFileSink,
-    EventLogger,
-    EnvelopeSink,
-    MultiSink,
-    NetworkSink,
-    JsonlFileSink,
-    Sink,
-    TerminationReason,
-    evaluation_csv_schema,
-    iso_now,
-    new_run_id,
-)
-from archipelago_logging.version import HARNESS_VERSION, SCHEMA_VERSION
+from archipelago_logging import EventLogger, TerminationReason, iso_now, new_run_id
+from archipelago_logging.version import HARNESS_VERSION
 
-STREAM_PROTOCOL_VERSION = "1.1"
-
-from .backends import DockerBackend, ExecutionBackend, LocalBackend, WorkerSpec
+from .backends import DockerBackend, IslandSpec
 from .config import RunConfig
 from .control_server import ControlServer
+from .redis_stream import RedisStreamWriter, ping_broker, stream_key, stream_length
 from .topology import build_topology, describe_topology
 
 __all__ = ["Master", "RunSummary", "run"]
+
+_POLL_SECONDS = 0.5
 
 
 @dataclass
@@ -43,9 +29,7 @@ class RunSummary:
     """Everything a caller needs to know about a finished run."""
 
     run_id: str
-    output_dir: Path
-    aggregate_log: Path | None
-    evaluations_csv: Path | None
+    stream_key: str
     termination_reason: str
     wallclock_seconds: float
     islands_completed: int
@@ -57,6 +41,19 @@ class RunSummary:
     global_best_island: int | None
     per_island: dict[str, Any] = field(default_factory=dict)
     island_results: list[dict[str, Any]] = field(default_factory=list)
+    error: str | None = None
+    """Why the run failed, readable by a person; None unless ``termination_reason`` is error."""
+
+
+def _failure_text(failure: Exception | None, failed_islands: list[dict[str, Any]]) -> str:
+    """The run's error for a person: what the master hit, then why each failed island failed."""
+    parts = []
+    if failure is not None:
+        parts.append(f"run failed: {type(failure).__name__}: {failure}")
+    for result in failed_islands:
+        reason = result.get("error") or result.get("termination_reason")
+        parts.append(f"island {result.get('island_id')} failed: {reason}")
+    return "; ".join(parts)
 
 
 def _host_facts() -> dict[str, Any]:
@@ -115,377 +112,290 @@ class Master:
         self.config = config
         self.repository_root = Path(repository_root or Path(__file__).resolve().parents[1])
         self.run_id = config.run_id or new_run_id()
-        self.output_dir = config.output_path(self.run_id)
         self.topology = build_topology(
             config.migration.topology, config.num_islands, **config.migration.topology_params
         )
 
-        self.aggregate_sink: Sink | None = None
-        self.evaluation_sink: Sink | None = None
-        self.stream_sink: NetworkSink | None = None
+        self.writer: RedisStreamWriter | None = None
         self.logger: EventLogger | None = None
         self.server: ControlServer | None = None
-        self.backend: ExecutionBackend | None = None
+        self.backend: DockerBackend | None = None
         self._node_ids: dict[int, str] = {}
+        self._run_started = False
 
 
-    def _make_backend(self) -> ExecutionBackend:
-        if self.config.execution.backend == "docker":
-            return DockerBackend(
-                image=self.config.docker.image,
-                run_id=self.run_id,
-                dockerfile=self.config.docker.dockerfile,
-                build_context=self.config.docker.build_context,
-                build=self.config.docker.build,
-                build_network=self.config.docker.build_network,
-                cpus=self.config.docker.cpus,
-                memory=self.config.docker.memory,
-                network=self.config.docker.network,
-                auto_remove=self.config.docker.auto_remove,
-                environment=self.config.docker.environment,
-                labels=self.config.docker.labels,
-                mount_output_dir=self.config.docker.mount_output_dir,
-                repository_root=self.repository_root,
-                logging_output_root=Path(self.config.logging.output_dir),
-            )
-        return LocalBackend(
-            python_executable=self.config.execution.worker_python,
+    def _make_backend(self) -> DockerBackend:
+        return DockerBackend(
+            image=self.config.docker.image,
+            run_id=self.run_id,
+            dockerfile=self.config.docker.dockerfile,
+            build_context=self.config.docker.build_context,
+            build=self.config.docker.build,
+            build_network=self.config.docker.build_network,
+            cpus=self.config.docker.cpus,
+            memory=self.config.docker.memory,
             repository_root=self.repository_root,
         )
-
-    def _make_stream_sink(self) -> "NetworkSink | None":
-        """Open the live stream, or return None when it is not configured."""
-        stream = self.config.logging.live_stream
-        if not stream.enabled:
-            return None
-        hello = (
-            json.dumps(
-                {
-                    "kind": "hello",
-                    "protocol": STREAM_PROTOCOL_VERSION,
-                    "run_id": self.run_id,
-                    "schema_version": SCHEMA_VERSION,
-                    "harness_version": HARNESS_VERSION,
-                    "algorithm": self.config.algorithm,
-                    "benchmark": self.config.benchmark,
-                    "num_islands": self.config.num_islands,
-                    "evaluation_columns": list(EVALUATION_CSV_COLUMNS),
-                    "started_at": iso_now(),
-                }
-            )
-            + "\n"
-        )
-        return NetworkSink(
-            stream.host,
-            stream.port,
-            queue_size=stream.queue_size,
-            connect_timeout=stream.connect_timeout_seconds,
-            max_reconnect_attempts=stream.max_reconnect_attempts,
-            handshake=hello,
-        )
-
-    def _send_artifact(self, relative_path: str, text: str) -> None:
-        """Mirror a file the master wrote, so a receiver can reproduce it verbatim."""
-        if self.stream_sink is None:
-            return
-        self.stream_sink.write(
-            json.dumps({"kind": "artifact", "path": relative_path, "content": text})
-        )
-
-    def _send_stream_tail(self, summary_payload: dict[str, Any]) -> None:
-        """Close the stream with the run summary, mirroring summary.json."""
-        if self.stream_sink is None:
-            return
-        self.stream_sink.write(
-            json.dumps({"kind": "summary", "summary": summary_payload}, default=str)
-        )
-        self.stream_sink.write(json.dumps({"kind": "bye", "run_id": self.run_id}))
 
     def _bind_address(self) -> tuple[str, int]:
         """Where the master listens."""
         host = self.config.execution.control_host
-        if self.config.execution.backend == "docker" and host in ("127.0.0.1", "localhost"):
+        if host in ("127.0.0.1", "localhost"):
             host = "0.0.0.0"
         return host, self.config.execution.control_port
 
     def _advertise_host(self) -> str:
-        """The address workers use to reach the master."""
+        """The address islands use to reach the master."""
         if self.config.execution.advertise_host:
             return self.config.execution.advertise_host
-        if self.config.execution.backend == "docker":
-            alias = getattr(self.backend, "master_alias", None)
-            if alias:
-                return alias
-            if getattr(self.backend, "worker_network", None) == "host":
-                return self.config.execution.control_host
-            return "host.docker.internal"
+        alias = getattr(self.backend, "master_alias", None)
+        if alias:
+            return alias
+        # The master is on the host, and so, on host networking, are its islands.
         return self.config.execution.control_host
 
 
     def run(self) -> RunSummary:
-        """Execute the run and return its summary."""
+        """Execute the run and return its summary.
+
+        Whatever happens after ``run_start``, the stream ends the same way: every island has
+        said goodbye, died, or been stopped (the barrier), then the closing diagnostics, then
+        ``run_end``, and nothing after it.
+        """
         started = time.monotonic()
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        (self.output_dir / "islands").mkdir(parents=True, exist_ok=True)
-        if self.config.execution.backend == "docker":
-            self.output_dir.chmod(0o777)
-            (self.output_dir / "islands").chmod(0o777)
-        config_path = self.config.write_resolved(self.output_dir / "resolved_config.yaml")
-        self._pending_artifacts: list[tuple[str, str]] = [
-            ("resolved_config.yaml", config_path.read_text(encoding="utf-8"))
-        ]
-
-        compress = self.config.logging.compress
-        gz = ".gz" if compress else ""
-
-        if self.config.logging.stream_to_master:
-            aggregate_path = self.output_dir / f"run.jsonl{gz}"
-        else:
-            aggregate_path = self.output_dir / f"master.jsonl{gz}"
-        self.stream_sink = self._make_stream_sink()
-        for relative, text in self._pending_artifacts:
-            self._send_artifact(relative, text)
-        self._pending_artifacts.clear()
-
-        aggregate_file: Sink = JsonlFileSink(
-            aggregate_path,
-            compress=compress,
-            flush_interval_seconds=self.config.logging.flush_interval_seconds,
-        )
-        self.aggregate_sink = (
-            MultiSink(
-                [aggregate_file, EnvelopeSink(self.stream_sink, "event", "record", json_body=True)]
-            )
-            if self.stream_sink is not None
-            else aggregate_file
-        )
-
-        evaluations_path: Path | None = None
-        if self.config.logging.stream_to_master and self.config.logging.log_evaluations:
-            evaluations_path = self.output_dir / f"evaluations.csv{gz}"
-            file_sink: Sink = CsvFileSink(
-                evaluations_path,
-                header=EVALUATION_CSV_HEADER,
-                compress=compress,
-                flush_interval_seconds=self.config.logging.flush_interval_seconds,
-            )
-            self.evaluation_sink = (
-                MultiSink([file_sink, EnvelopeSink(self.stream_sink, "evaluation", "row")])
-                if self.stream_sink is not None
-                else file_sink
-            )
-            schema_text = json.dumps(evaluation_csv_schema(), indent=2) + "\n"
-            (self.output_dir / "evaluations.schema.json").write_text(schema_text, encoding="utf-8")
-            self._send_artifact("evaluations.schema.json", schema_text)
-
-        self.logger = EventLogger(
-            self.run_id,
-            "master",
-            self.aggregate_sink,
-            validate=self.config.logging.validate_events,
-        )
-
+        stream = self._preflight()
         termination = TerminationReason.COMPLETED.value
-        island_results: list[dict[str, Any]] = []
-
+        failure: Exception | None = None
         try:
-            bind_host, bind_port = self._bind_address()
-            self.server = ControlServer(
-                run_id=self.run_id,
-                topology=self.topology,
-                logger=self.logger,
-                aggregate_sink=self.aggregate_sink if self.config.logging.stream_to_master else None,
-                evaluation_sink=self.evaluation_sink,
-                host=bind_host,
-                port=bind_port,
-                max_pending_per_island=self.config.migration.max_pending_per_island,
-                fanout=self.config.migration.fanout,
-                evaluation_budget=self.config.evaluation_budget,
-            )
-            actual_host, actual_port = self.server.start()
-
-            migration_description = {
-                **describe_topology(
-                    self.config.migration.topology,
-                    self.config.num_islands,
-                    self.topology,
-                    **self.config.migration.topology_params,
-                ),
-                "enabled": self.config.migration.enabled,
-                "interval": self.config.migration.interval,
-                "num_migrants": self.config.migration.num_migrants,
-                "selection": self.config.migration.selection,
-                "replacement": self.config.migration.replacement,
-                "fanout": self.config.migration.fanout,
-                "copy_migrants": self.config.migration.copy_migrants,
-                "phase_jitter": self.config.migration.phase_jitter,
-            }
-
-            self.backend = self._make_backend()
-            self.backend.prepare()
-            build_warning = getattr(self.backend, "build_warning", None)
-
-            self.logger.run_start(
-                started_at=iso_now(),
-                harness_version=HARNESS_VERSION,
-                algorithm=self.config.algorithm,
-                benchmark=self.config.benchmark,
-                num_islands=self.config.num_islands,
-                population_size=self.config.resolved_population_size(),
-                evaluation_budget=self.config.evaluation_budget,
-                evaluation_budget_per_island=self.config.budget_per_island(),
-                target_generations=self.config.target_generations,
-                max_generations=self.config.termination.max_generations,
-                backend=self.backend.name,
-                datasets=_dataset_provenance(self.config),
-                migration=migration_description,
-                config={
-                    **self.config.resolved(),
-                    "_runtime": {
-                        "control_host": actual_host,
-                        "control_port": actual_port,
-                        "advertise_host": self._advertise_host(),
-                        "output_dir": str(self.output_dir),
-                        "resolved_config_path": str(config_path),
-                        "budget_plan": self.config.budget_plan(),
-                        "backend": self.backend.describe(),
-                        "log_volume_estimate": self.config.estimate_log_volume(),
-                    },
-                },
-                host=_host_facts(),
-            )
-
-            if build_warning:
-                self.logger.diagnostic(build_warning, level="warning")
-
-            advertise = self._advertise_host()
-            for island_id in range(self.config.num_islands):
-                spec = WorkerSpec(
-                    island_id=island_id,
-                    run_id=self.run_id,
-                    config_path=config_path.resolve(),
-                    output_dir=self.output_dir.resolve(),
-                    control_host=advertise,
-                    control_port=actual_port,
-                )
-                node_id = self.backend.launch(spec)
-                self._node_ids[island_id] = node_id
-                self.logger.diagnostic(
-                    "island worker launched",
-                    island_id=island_id,
-                    node_id=node_id,
-                    backend=self.backend.name,
-                )
-
+            self._start()
             termination = self._supervise(started)
-            island_results = self._collect_results()
-
         except Exception as exc:
+            failure = exc
             termination = TerminationReason.ERROR.value
-            if self.logger is not None:
-                self.logger.diagnostic(f"run failed: {type(exc).__name__}: {exc}", level="error")
-            raise
+        try:
+            stopping = failure is not None or termination == TerminationReason.TIME_LIMIT.value
+            if stopping and self.backend is not None and self.server is not None:
+                self._wind_down()
+            island_results = self._collect_results() if self.backend is not None else []
+            summary = self._finish(started, termination, island_results, stream, failure)
         finally:
-            summary = self._shutdown(
-                started, termination, island_results, aggregate_path, evaluations_path
-            )
-
+            self._release()
+        if failure is not None:
+            raise failure
         return summary
 
-    def _supervise(self, started: float) -> str:
-        """Wait for the workers to finish, or for the wall-clock limit to expire."""
-        assert self.backend is not None and self.server is not None and self.logger is not None
+    def _preflight(self) -> str:
+        """Check Redis and the run's stream before anything starts; open the master's writer."""
+        broker = self.config.broker
+        stream = stream_key(self.run_id)
+        ping_broker(broker.url, broker.connect_timeout_seconds)
+        existing = stream_length(broker.url, stream)
+        if existing:
+            raise FileExistsError(
+                f"run_id {self.run_id!r} has already been used: {stream} holds {existing} entries, "
+                "and run_start must be the first. Choose a new run_id."
+            )
+        self.writer = RedisStreamWriter(
+            broker.url,
+            stream,
+            buffer_records=broker.buffer_records,
+            stall_seconds=broker.stall_seconds,
+        )
+        self.logger = EventLogger(self.run_id, "master", self.writer)
+        return stream
 
+    def _start(self) -> None:
+        """Start the control server, prepare Docker, write ``run_start`` and launch the islands."""
+        assert self.logger is not None
+        bind_host, bind_port = self._bind_address()
+        self.server = ControlServer(
+            run_id=self.run_id,
+            topology=self.topology,
+            logger=self.logger,
+            host=bind_host,
+            port=bind_port,
+            max_pending_per_island=self.config.migration.max_pending_per_island,
+            fanout=self.config.migration.fanout,
+            evaluation_budget=self.config.evaluation_budget,
+            seed=self.config.seed,
+        )
+        actual_host, actual_port = self.server.start()
+
+        migration_description = {
+            **describe_topology(
+                self.config.migration.topology,
+                self.config.num_islands,
+                self.topology,
+                **self.config.migration.topology_params,
+            ),
+            "enabled": self.config.migration.enabled,
+            "interval": self.config.migration.interval,
+            "num_migrants": self.config.migration.num_migrants,
+            "selection": self.config.migration.selection,
+            "replacement": self.config.migration.replacement,
+            "fanout": self.config.migration.fanout,
+            "copy_migrants": self.config.migration.copy_migrants,
+            "phase_jitter": self.config.migration.phase_jitter,
+        }
+
+        self.backend = self._make_backend()
+        self.backend.prepare()
+        build_warning = getattr(self.backend, "build_warning", None)
+
+        self.logger.run_start(
+            started_at=iso_now(),
+            harness_version=HARNESS_VERSION,
+            algorithm=self.config.algorithm,
+            benchmark=self.config.benchmark,
+            num_islands=self.config.num_islands,
+            population_size=self.config.resolved_population_size(),
+            evaluation_budget=self.config.evaluation_budget,
+            evaluation_budget_per_island=self.config.budget_per_island(),
+            target_generations=self.config.target_generations,
+            max_generations=self.config.termination.max_generations,
+            backend=self.backend.name,
+            datasets=_dataset_provenance(self.config),
+            migration=migration_description,
+            config={
+                **self.config.resolved(),
+                "_runtime": {
+                    "control_host": actual_host,
+                    "control_port": actual_port,
+                    "advertise_host": self._advertise_host(),
+                    "budget_plan": self.config.budget_plan(),
+                    "backend": self.backend.describe(),
+                },
+            },
+            host=_host_facts(),
+        )
+        self._run_started = True
+        # Wait until Redis holds run_start: a broken or full Redis fails the run here, before
+        # any island container starts.
+        self.logger.flush()
+
+        if build_warning:
+            self.logger.diagnostic(build_warning, level="warning")
+
+        advertise = self._advertise_host()
+        for island_id in range(self.config.num_islands):
+            spec = IslandSpec(
+                island_id=island_id,
+                run_id=self.run_id,
+                config_json=self.config.model_dump_json(),
+                control_host=advertise,
+                control_port=actual_port,
+            )
+            node_id = self.backend.launch(spec)
+            self._node_ids[island_id] = node_id
+            self.logger.diagnostic(
+                "island container launched",
+                island_id=island_id,
+                node_id=node_id,
+                backend=self.backend.name,
+            )
+
+
+    def _supervise(self, started: float) -> str:
+        """Wait until every island is done, or the wall-clock limit expires."""
+        assert self.backend is not None and self.writer is not None and self.logger is not None
         limit = self.config.termination.time_limit_seconds
         deadline = started + limit if limit is not None else None
-        poll_interval = 0.5
-
         while True:
-            time.sleep(poll_interval)
-            statuses = self.backend.statuses()
-
-            if not any(status.running for status in statuses.values()):
-                time.sleep(1.0)
-                finished = sum(
-                    1 for status in self.server.islands.values() if status.finished
-                )
-                return (
-                    TerminationReason.COMPLETED.value
-                    if finished == self.config.num_islands
-                    else TerminationReason.ERROR.value
-                )
-
+            self.writer.raise_if_failed()
+            if not self._islands_still_running():
+                return TerminationReason.COMPLETED.value
             if deadline is not None and time.monotonic() >= deadline:
                 self.logger.diagnostic(
                     "wall-clock limit reached; asking islands to wind down",
                     level="warning",
-                    time_limit_seconds=self.config.termination.time_limit_seconds,
+                    time_limit_seconds=limit,
                 )
-                self.server.stop_requested.set()
-                self.backend.stop_all(self.config.execution.shutdown_grace_seconds)
                 return TerminationReason.TIME_LIMIT.value
+            time.sleep(_POLL_SECONDS)
 
-    def _send_island_artifacts(self) -> None:
-        """Mirror each island's own files: its result, and whatever it wrote to stderr."""
-        if self.stream_sink is None:
-            return
-        for island_id in range(self.config.num_islands):
-            for name in (
-                f"island-{island_id:02d}.result.json",
-                f"island-{island_id:02d}.stderr.log",
-            ):
-                path = self.output_dir / "islands" / name
-                if not path.exists():
-                    continue
-                try:
-                    text = path.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    continue
-                self._send_artifact(f"islands/{name}", text)
+    def _islands_still_running(self) -> list[int]:
+        """Islands that have neither said goodbye nor exited."""
+        assert self.backend is not None and self.server is not None
+        statuses = self.backend.statuses()
+        return [
+            island_id
+            for island_id, status in statuses.items()
+            if status.running and not self.server.islands[island_id].finished
+        ]
+
+    def _wind_down(self) -> None:
+        """Stop the islands, and wait for each to say goodbye or die: the barrier before ``run_end``.
+
+        Islands are asked to finish their generation (the heartbeat flag, and SIGTERM for any that
+        cannot hear it) and get ``shutdown_grace_seconds`` to flush their records and say goodbye.
+        An island still silent after that is killed. On the normal path the barrier is already
+        met when :meth:`_supervise` returns: every island has said goodbye or exited.
+        """
+        assert self.backend is not None and self.server is not None
+        self.server.stop_requested.set()
+        self.backend.signal_all("SIGTERM")
+        grace = self.config.execution.shutdown_grace_seconds
+        gives_up_at = time.monotonic() + grace
+        while running := self._islands_still_running():
+            if time.monotonic() >= gives_up_at:
+                self._note(
+                    f"islands {running} did not say goodbye within {grace:g} s of being asked "
+                    "to stop; killing them",
+                    level="error",
+                    islands=running,
+                )
+                self.backend.kill(running)
+                return
+            time.sleep(_POLL_SECONDS)
 
     def _collect_results(self) -> list[dict[str, Any]]:
-        """Read each island's result file. Every island writes one, on every path."""
+        """Each island's result, as it arrived in its goodbye.
+
+        An island that never said goodbye crashed before it could; its container's exit code
+        and last output, read before the container is removed, say why.
+        """
+        assert self.server is not None and self.backend is not None
         results: list[dict[str, Any]] = []
         for island_id in range(self.config.num_islands):
-            path = self.output_dir / "islands" / f"island-{island_id:02d}.result.json"
-            try:
-                results.append(json.loads(path.read_text(encoding="utf-8")))
-            except (OSError, json.JSONDecodeError) as exc:
-                results.append(
-                    {
-                        "island_id": island_id,
-                        "termination_reason": TerminationReason.ERROR.value,
-                        "error": f"no readable result file at {path}: {exc}",
-                    }
-                )
+            reported = self.server.islands[island_id].result
+            if reported is not None:
+                results.append(reported)
+                continue
+            report = self.backend.exit_report(island_id)
+            error = (
+                f"island {island_id} exited without reporting a result "
+                f"(container exit code {report['exit_code']})"
+            )
+            self._note(error, level="error", island_id=island_id, log_tail=report["log_tail"])
+            results.append(
+                {
+                    "island_id": island_id,
+                    "termination_reason": TerminationReason.ERROR.value,
+                    "error": f"{error}; last output: {report['log_tail'][-500:]}",
+                }
+            )
         return results
 
-    def _shutdown(
+    def _finish(
         self,
         started: float,
         termination: str,
         island_results: list[dict[str, Any]],
-        aggregate_path: Path | None,
-        evaluations_path: Path | None,
+        stream: str,
+        failure: Exception | None,
     ) -> RunSummary:
-        """Emit ``run_end``, stop the server and the backend, close the sinks."""
+        """Write the closing diagnostics and ``run_end``, then close the writer."""
         elapsed = time.monotonic() - started
-
-        completed = sum(
-            1
+        failed_islands = [
+            result
             for result in island_results
-            if result.get("termination_reason")
-            in (
-                TerminationReason.COMPLETED.value,
-                TerminationReason.MAX_GENERATIONS.value,
-                TerminationReason.MAX_EVALUATIONS.value,
-                TerminationReason.TARGET_FITNESS_REACHED.value,
-                TerminationReason.STAGNATION.value,
-                TerminationReason.TIME_LIMIT.value,
-                TerminationReason.ABORTED.value,
-            )
-        )
-        failed = len(island_results) - completed
+            if result.get("error") is not None
+            or result.get("termination_reason") == TerminationReason.ERROR.value
+        ]
+        failed = len(failed_islands)
+        completed = len(island_results) - failed
+        if failed and termination != TerminationReason.ERROR.value:
+            termination = TerminationReason.ERROR.value
         total_evaluations = sum(int(result.get("evaluations_total") or 0) for result in island_results)
 
         best_fitness: float | None = None
@@ -525,19 +435,15 @@ class Master:
                     "algorithm_summary": result.get("algorithm_summary"),
                 }
 
-        if self.logger is not None and self.stream_sink is not None and self.stream_sink.stats.degraded:
-            stream = self.config.logging.live_stream
-            self.logger.diagnostic(
-                "the live evaluation stream is degraded; rows are being dropped rather than "
-                "delivered. evaluations.csv is unaffected.",
-                level="warning",
-                host=stream.host,
-                port=stream.port,
-                last_error=self.stream_sink.stats.last_error,
-            )
-
-        if self.logger is not None and self.server is not None:
+        if self.server is not None:
+            self.server.stop()  # no island is left to talk to, and nothing may follow run_end
+        # Closing records only follow a run_start: a stream must never begin with anything else.
+        if self._run_started and self.server is not None and not self.writer.failed:
             self._warn_if_no_island_ever_connected()
+            if termination == TerminationReason.ERROR.value:
+                self.logger.diagnostic(
+                    _failure_text(failure, failed_islands), level="error", islands_failed=failed
+                )
             self.logger.run_end(
                 ended_at=iso_now(),
                 termination_reason=termination,
@@ -553,23 +459,12 @@ class Master:
                 global_best_genome=best_genome,
                 per_island=per_island,
             )
+        if not self.writer.failed:
+            self.writer.close()
 
-        if self.backend is not None:
-            self.backend.stop_all(self.config.execution.shutdown_grace_seconds)
-        if self.server is not None:
-            self.server.stop()
-        if self.backend is not None:
-            self.backend.cleanup()
-        if self.aggregate_sink is not None:
-            self.aggregate_sink.close()
-        if self.evaluation_sink is not None:
-            self.evaluation_sink.close()
-
-        summary = RunSummary(
+        return RunSummary(
             run_id=self.run_id,
-            output_dir=self.output_dir,
-            aggregate_log=aggregate_path,
-            evaluations_csv=evaluations_path,
+            stream_key=stream,
             termination_reason=termination,
             wallclock_seconds=elapsed,
             islands_completed=completed,
@@ -581,24 +476,20 @@ class Master:
             global_best_island=best_island,
             per_island=per_island,
             island_results=island_results,
+            error=_failure_text(failure, failed_islands) if failed or failure else None,
         )
-        payload = {
-            **{
-                key: (str(value) if isinstance(value, Path) else value)
-                for key, value in summary.__dict__.items()
-            },
-            "schema_version": SCHEMA_VERSION,
-            "harness_version": HARNESS_VERSION,
-            "live_stream": self._stream_stats(),
-        }
-        (self.output_dir / "summary.json").write_text(
-            json.dumps(payload, indent=2, default=str), encoding="utf-8"
-        )
-        self._send_island_artifacts()
-        self._send_stream_tail(payload)
-        if self.stream_sink is not None:
-            self.stream_sink.close()
-        return summary
+
+    def _release(self) -> None:
+        """Stop the control server and remove the run's containers and network."""
+        if self.server is not None:
+            self.server.stop()
+        if self.backend is not None:
+            self.backend.cleanup()
+
+    def _note(self, message: str, **context: Any) -> None:
+        """A diagnostic, unless the master's writer has already failed."""
+        if self.logger is not None and self.writer is not None and not self.writer.failed:
+            self.logger.diagnostic(message, **context)
 
     def _warn_if_no_island_ever_connected(self) -> None:
         """Say so when the islands ran but never reached the master."""
@@ -606,11 +497,11 @@ class Master:
         if any(status.ready for status in self.server.islands.values()):
             return
         hint = (
-            "islands reach the master over the run's private Docker network"
+            "islands reach the master over the run's private Docker network, as "
+            f"{getattr(self.backend, 'master_alias', None)!r}"
             if getattr(self.backend, "master_alias", None)
-            else "islands reach a host master through host.docker.internal, which a host "
-            "firewall may reject -- on Ubuntu, `sudo ufw allow in on docker0`, or run the "
-            "master in a container so the traffic never leaves Docker"
+            else "islands share the host's network and reach a host master at "
+            "execution.control_host; check advertise_host and any firewall on that address"
         )
         self.logger.diagnostic(
             "no island ever connected to the master, so no migration took place; "
@@ -619,22 +510,6 @@ class Master:
             advertise_host=self._advertise_host(),
             backend=self.backend.name if self.backend else None,
         )
-
-    def _stream_stats(self) -> dict[str, Any] | None:
-        """Delivery accounting for the live evaluation stream, for summary.json."""
-        if self.stream_sink is None:
-            return None
-        stats = self.stream_sink.stats
-        stream = self.config.logging.live_stream
-        return {
-            "host": stream.host,
-            "port": stream.port,
-            "records_sent": stats.written,
-            "records_dropped": stats.dropped,
-            "errors": stats.errors,
-            "degraded": stats.degraded,
-            "last_error": stats.last_error,
-        }
 
     def _maximising(self) -> bool:
         """Objective orientation, needed to pick the global best across islands."""
