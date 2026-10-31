@@ -1,0 +1,67 @@
+# Production: the Runner alone. Redis is the Archipelago Backend's, and the Runner's settings come
+# from .env.prod (see .env.prod.example; docs/CONFIGURATION.md lists every setting).
+#
+#   cp .env.prod.example .env.prod      # set REDIS_URL and RUNNER_BIND
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#
+# The Runner starts one master container per run, and each master its islands, as sibling
+# containers through the Docker socket. They join the Runner's networks, so they reach Redis
+# wherever the Runner does; README.md ("Production") says how, for each place Redis can be.
+#
+# Do not run this and the development stack (docker-compose.yml) on one Docker daemon: each Runner
+# would adopt the other's runs.
+
+name: archipelago-runner
+
+services:
+  # Build-only: makes `--build` build the image each run's master starts islands from. It exits as
+  # soon as it starts.
+  island:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.island
+      network: host
+    image: archipelago-island:latest
+    entrypoint: ["true"]
+    restart: "no"
+
+  runner:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.runner
+      network: host
+    image: archipelago-runner:latest
+    depends_on:
+      island:
+        condition: service_completed_successfully
+    env_file: .env.prod
+    environment:
+      REDIS_URL: ${REDIS_URL:?set REDIS_URL in .env.prod (see .env.prod.example)}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      # The Runner has no authentication, and ufw does not filter ports Docker publishes: bind to
+      # the address the backend reaches the Runner at, never a public one.
+      - "${RUNNER_BIND:?set RUNNER_BIND in .env.prod (see .env.prod.example)}:${RUNNER_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    # Redis in a container of another compose project on this host (the backend's): join its
+    # network and put its service name in REDIS_URL. Uncomment these two lines and the `networks`
+    # block below, with that network's name from `docker network ls`.
+    # networks:
+    #   - default
+    #   - backend
+
+# networks:
+#   backend:
+#     external: true
+#     name: <the backend's network>

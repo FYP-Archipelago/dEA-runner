@@ -9,3 +9,4 @@ docs/
 tests/
 *.egg-info/
 .env
+.env.prod
