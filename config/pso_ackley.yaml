@@ -40,13 +40,3 @@ migration:
 
 logging:
   genome_mode: compact
-
-docker:
-  image: archipelago-island:latest
-  build: true          # built automatically if missing or older than the sources
-  dockerfile: docker/Dockerfile.island
-  cpus: 1.0
-  memory: 2g
-  # Docker's builder VM may not inherit the host resolver, which shows up as pip
-  # being unable to reach PyPI. "host" fixes it and is harmless otherwise.
-  build_network: host

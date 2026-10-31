@@ -2,7 +2,7 @@
 """A dummy Worker Pool worker: follows every run's stream and prints what lands in it.
 
 Stands in for the Archipelago Backend's clustering workers in the local compose stack. It
-depends only on redis-py, as a real worker would, and reads ``run:*:raw`` streams without a
+depends only on redis-py, as a real worker would, and reads ``run:*:runner_logs`` streams without a
 consumer group: it watches, and takes nothing from anyone.
 
 Each evaluation row is printed as one short line (they are almost all of a run's volume); every
@@ -13,7 +13,7 @@ stream contract, and is flagged.
 
     REDIS_URL=redis://:password@127.0.0.1:6380/0 python scripts/dummy_worker.py
 
-``STREAM_PATTERN`` narrows what it watches, e.g. to one run: ``run:run-2026...-1a2b3c4d:raw``.
+``STREAM_PATTERN`` narrows what it watches, e.g. to one run: ``run:run-2026...-1a2b3c4d:runner_logs``.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from typing import TextIO
 
 import redis
 
-PATTERN = "run:*:raw"
+PATTERN = "run:*:runner_logs"
 _BLOCK_MS = 1000
 _BATCH = 500
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "archipelago-baseline-dea"
-version = "0.4.0"
+version = "0.5.0"
 description = "Baseline distributed evolutionary algorithm harness and standardized event log for the Archipelago explainability framework"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,16 +14,15 @@ dependencies = [
     "PyYAML>=6.0",
     "redis>=5.0",
     "docker>=7.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pyflakes>=3.0"]
-
-[project.scripts]
-archipelago = "orchestrator.cli:main"
+dev = ["pytest>=8.0", "pyflakes>=3.0", "httpx2>=2.0"]
 
 [tool.setuptools]
-packages = ["archipelago_logging", "algorithms", "benchmarks", "orchestrator", "orchestrator.backends"]
+packages = ["archipelago_logging", "algorithms", "benchmarks", "orchestrator", "orchestrator.backends", "service"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

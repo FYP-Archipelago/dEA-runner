@@ -1,8 +1,9 @@
 """Island container entrypoint.
 
 The master starts one of these per island. The run's configuration arrives as JSON in the
-``ISLAND_CONFIG`` environment variable, records go straight to Redis, and the island's result goes
-back to the master in its goodbye message. Nothing is read from or written to disk.
+``ISLAND_CONFIG`` environment variable and the Runner's settings in the rest of the environment;
+records go straight to Redis, and the island's result goes back to the master in its goodbye
+message. Nothing is read from or written to disk.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Any
 
 from orchestrator.config import ISLAND_CONFIG_ENV, RunConfig
 from orchestrator.island_runner import IslandResult, IslandRunner
+from orchestrator.settings import ServiceSettings
 
 __all__ = ["main", "run_island"]
 
@@ -39,13 +41,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def run_island(
     config: RunConfig,
+    settings: ServiceSettings,
     *,
     run_id: str,
     island_id: int,
     control_address: tuple[str, int] | None,
 ) -> IslandResult:
     """Run one island to completion and return its result."""
-    runner = IslandRunner(config, island_id, run_id, control_address=control_address)
+    runner = IslandRunner(config, settings, island_id, run_id, control_address=control_address)
 
     def _handle_stop(signum: int, _frame: Any) -> None:
         runner.request_stop(f"received signal {signum}")
@@ -68,7 +71,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = RunConfig.model_validate_json(os.environ[ISLAND_CONFIG_ENV])
         result = run_island(
-            config, run_id=args.run_id, island_id=args.island_id, control_address=control_address
+            config,
+            ServiceSettings.from_env(),
+            run_id=args.run_id,
+            island_id=args.island_id,
+            control_address=control_address,
         )
     except Exception:
         # The island never got as far as reporting; the master reads this from the

@@ -1,14 +1,13 @@
-"""Run configuration: one YAML file, validated at startup, overridable everywhere."""
+"""A run's configuration: what its preset and the backend's overrides decide.
+
+How the Runner is deployed (Redis, images, limits, timeouts) is not part of it; that is
+:class:`~orchestrator.settings.ServiceSettings`, read from the environment.
+"""
 
 from __future__ import annotations
 
-import json
-import os
-from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlsplit, urlunsplit
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from archipelago_logging.genome import DEFAULT_PRECISION_DECIMALS, GenomeLogMode
@@ -18,34 +17,16 @@ from archipelago_logging.version import HARNESS_VERSION, SCHEMA_VERSION
 __all__ = [
     "MigrationConfig",
     "LoggingConfig",
-    "BrokerConfig",
-    "ExecutionConfig",
-    "DockerConfig",
+    "TerminationConfig",
     "RunConfig",
-    "load_config",
-    "apply_overrides",
-    "redact_url",
-    "ENV_PREFIX",
+    "RUN_CONFIG_ENV",
     "ISLAND_CONFIG_ENV",
 ]
 
-ENV_PREFIX = "ARCHIPELAGO_"
+RUN_CONFIG_ENV = "RUN_CONFIG"
+"""Carries the run's config, as JSON, into the run's master container."""
 ISLAND_CONFIG_ENV = "ISLAND_CONFIG"
-"""Carries the run's full config, as JSON, into each island container. Deliberately outside the
-``ARCHIPELAGO_`` prefix, which is reserved for overriding single config fields."""
-
-
-def redact_url(url: str) -> str:
-    """The URL with any password replaced, so it can be logged."""
-    parts = urlsplit(url)
-    if parts.password is None:
-        return url
-    user = parts.username or ""
-    host = parts.hostname or ""
-    if ":" in host:
-        host = f"[{host}]"
-    port = f":{parts.port}" if parts.port is not None else ""
-    return urlunsplit(parts._replace(netloc=f"{user}:***@{host}{port}"))
+"""Carries the run's config, as JSON, into each island container."""
 
 
 class _Base(BaseModel):
@@ -120,30 +101,6 @@ class LoggingConfig(_Base):
     )
 
 
-class BrokerConfig(_Base):
-    """The Redis (or Valkey) server every record is appended to."""
-
-    url: str = Field(
-        default="redis://127.0.0.1:6379/0",
-        description="redis://[user:password@]host:port/db. The master and every island append to it directly; islands join the master's Docker networks, so the address the master uses works for them too. A password is redacted wherever the config is logged.",
-    )
-    connect_timeout_seconds: float = Field(
-        default=10.0,
-        gt=0.0,
-        description="How long the master, and then each island, keeps trying to reach Redis at startup before the run fails.",
-    )
-    stall_seconds: float = Field(
-        default=120.0,
-        gt=0.0,
-        description="How long a writer keeps retrying with nothing acknowledged before the run fails. Records are never dropped, so a broker that stays unavailable fails the run instead.",
-    )
-    buffer_records: int = Field(
-        default=10_000,
-        ge=1,
-        description="Records an island holds while Redis catches up. When the buffer is full the island waits.",
-    )
-
-
 class TerminationConfig(_Base):
     """When an island stops."""
 
@@ -166,64 +123,13 @@ class TerminationConfig(_Base):
         default=None,
         description="Stop an island once its best objective value passes this.",
     )
-    time_limit_seconds: float | None = Field(
-        default=None, gt=0.0, description="Wall-clock limit for the whole run."
-    )
-
-
-class ExecutionConfig(_Base):
-    """How the master and its island containers talk to each other."""
-
-    control_host: str = Field(
-        default="127.0.0.1", description="Address the master binds for control and log collection."
-    )
-    control_port: int = Field(
-        default=0, ge=0, le=65535, description="0 selects an ephemeral port, reported in the log."
-    )
-    advertise_host: str | None = Field(
-        default=None,
-        description="Address islands use to reach the master. Defaults to the master's alias on the run's network when the master is itself a container, and to control_host when the master is on the host (its islands then share the host network).",
-    )
-    connect_timeout_seconds: float = Field(
-        default=60.0,
-        gt=0.0,
-        description="How long an island retries the master's control socket at startup before giving up and running standalone (no migration). Containers can take several seconds to start, so this needs headroom.",
-    )
-    heartbeat_interval_seconds: float = Field(
-        default=2.0,
-        gt=0.0,
-        description="How often an island reports its progress to the master. Carries the archipelago-wide evaluation total, and brings back the master's 'wind down' flag; it is not a liveness probe.",
-    )
-    shutdown_grace_seconds: float = Field(
-        default=20.0,
-        gt=0.0,
-        description="How long an island gets to finish its generation and flush its records after being asked to stop, before it is killed.",
-    )
-
-
-class DockerConfig(_Base):
-    """Island container image and resource limits."""
-
-    image: str = Field(default="archipelago-island:latest")
-    build: bool = Field(
-        default=True, description="Build the image from `dockerfile` if it is missing or out of date."
-    )
-    dockerfile: str = Field(default="docker/Dockerfile.island")
-    build_context: str = Field(default=".")
-    build_network: str | None = Field(
-        default=None,
-        description="Network mode for the image build. Leave unset for the daemon default.",
-    )
-    cpus: float = Field(default=1.0, gt=0.0, description="CPU quota.")
-    memory: str = Field(default="2g", description="Memory limit per island container, e.g. '2g'.")
 
 
 class RunConfig(_Base):
     """The complete, validated description of one dEA run."""
 
-    run_id: str | None = Field(
-        default=None,
-        description="Supplied by the caller, or minted when absent. Must look like run-YYYYMMDDTHHMMSSZ-xxxxxxxx; container and network names are built from its last 8 hex digits.",
+    run_id: str = Field(
+        description="Minted by the Archipelago Backend and used verbatim everywhere. Must look like run-YYYYMMDDTHHMMSSZ-xxxxxxxx; container and network names are built from its last 8 hex digits.",
     )
     description: str = Field(default="", description="Free-text note carried into run_start.")
     seed: int | None = Field(
@@ -263,16 +169,13 @@ class RunConfig(_Base):
 
     migration: MigrationConfig = Field(default_factory=MigrationConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
-    broker: BrokerConfig = Field(default_factory=BrokerConfig)
-    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
-    docker: DockerConfig = Field(default_factory=DockerConfig)
 
 
     @field_validator("run_id")
     @classmethod
-    def _run_id_shape(cls, run_id: str | None) -> str | None:
-        """A supplied run id must have the shape `new_run_id` mints."""
-        return run_id if run_id is None else check_run_id(run_id)
+    def _run_id_shape(cls, run_id: str) -> str:
+        """The run id must have the shape `new_run_id` mints."""
+        return check_run_id(run_id)
 
     @model_validator(mode="after")
     def _validate(self) -> "RunConfig":
@@ -398,7 +301,7 @@ class RunConfig(_Base):
         return max(1, (self.budget_per_island() - self.resolved_population_size()) // per_generation)
 
     def budget_plan(self) -> dict[str, Any]:
-        """How the evaluation budget resolves. Logged in ``run_start`` and shown by the CLI."""
+        """How the evaluation budget resolves. Logged in ``run_start``."""
         population = self.resolved_population_size()
         per_generation = self.evaluations_per_generation()
         generations = self.projected_generations()
@@ -425,96 +328,8 @@ class RunConfig(_Base):
     def resolved(self) -> dict[str, Any]:
         """JSON-safe dict of the fully resolved config, for ``run_start.config``."""
         payload = self.model_dump(mode="json")
-        payload["broker"]["url"] = redact_url(self.broker.url)
         payload["_meta"] = {
             "schema_version": SCHEMA_VERSION,
             "harness_version": HARNESS_VERSION,
         }
         return payload
-
-
-def _coerce(text: str) -> Any:
-    """Parse an override value as JSON, falling back to the raw string."""
-    try:
-        return json.loads(text)
-    except (json.JSONDecodeError, TypeError):
-        return text
-
-
-def _set_path(target: dict[str, Any], dotted: str, value: Any) -> None:
-    parts = dotted.split(".")
-    cursor = target
-    for part in parts[:-1]:
-        existing = cursor.get(part)
-        if not isinstance(existing, dict):
-            existing = {}
-            cursor[part] = existing
-        cursor = existing
-    cursor[parts[-1]] = value
-
-
-def _env_overrides(environ: dict[str, str] | None = None) -> dict[str, Any]:
-    """Collect ``ARCHIPELAGO_*`` variables into a nested override dict."""
-    environ = os.environ if environ is None else environ
-    known = set(RunConfig.model_fields)
-    overrides: dict[str, Any] = {}
-    for key, raw in environ.items():
-        if not key.startswith(ENV_PREFIX):
-            continue
-        dotted = key[len(ENV_PREFIX) :].lower().replace("__", ".")
-        head = dotted.split(".", 1)[0]
-        if head not in known:
-            raise ValueError(
-                f"environment variable {key} does not name a run-config field "
-                f"({head!r} is not one of {sorted(known)}). The {ENV_PREFIX} prefix is "
-                "reserved for configuration overrides."
-            )
-        _set_path(overrides, dotted, _coerce(raw))
-    return overrides
-
-
-def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
-    for key, value in overlay.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _deep_merge(merged[key], value)
-        else:
-            merged[key] = value
-    return merged
-
-
-def apply_overrides(base: dict[str, Any], overrides: list[str] | None) -> dict[str, Any]:
-    """Apply ``key.path=value`` strings from ``--set`` flags."""
-    result = dict(base)
-    for item in overrides or []:
-        if "=" not in item:
-            raise ValueError(f"malformed override {item!r}; expected key.path=value")
-        dotted, _, raw = item.partition("=")
-        _set_path(result, dotted.strip(), _coerce(raw.strip()))
-    return result
-
-
-def load_config(
-    path: str | Path | None = None,
-    *,
-    overrides: list[str] | None = None,
-    environ: dict[str, str] | None = None,
-) -> RunConfig:
-    """Load, merge and validate a run configuration."""
-    document: dict[str, Any] = {}
-    if path is not None:
-        config_path = Path(path)
-        if not config_path.exists():
-            raise FileNotFoundError(f"config file not found: {config_path}")
-        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-        if not isinstance(loaded, dict):
-            raise ValueError(f"{config_path}: top level of a run config must be a mapping")
-        # A run's run_start.config can be fed back in to repeat the run; these two keys are
-        # what the master added to it.
-        loaded.pop("_meta", None)
-        loaded.pop("_runtime", None)
-        document = loaded
-
-    document = _deep_merge(document, _env_overrides(environ))
-    document = apply_overrides(document, overrides)
-    return RunConfig(**document)

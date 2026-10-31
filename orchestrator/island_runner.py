@@ -27,7 +27,12 @@ from .control_client import ControlClient
 from .migration import choose_replacements, select_migrants
 from .redis_stream import BrokerError, RedisStreamWriter, ping_broker, stream_key
 from .seeding import seed_for_island
+from .settings import ServiceSettings
 from .topology import build_topology
+
+CONTROL_CONNECT_TIMEOUT_SECONDS = 60.0
+"""How long an island retries the master's control socket at startup before running standalone
+(no migration). Containers can take several seconds to start, so this needs headroom."""
 
 __all__ = ["IslandRunner", "IslandResult", "resolve_node_id"]
 
@@ -72,6 +77,7 @@ class IslandRunner:
     def __init__(
         self,
         config: RunConfig,
+        settings: ServiceSettings,
         island_id: int,
         run_id: str,
         *,
@@ -79,6 +85,7 @@ class IslandRunner:
         container_id: str | None = None,
     ) -> None:
         self.config = config
+        self.settings = settings
         self.island_id = island_id
         self.run_id = run_id
         self.control_address = control_address
@@ -90,10 +97,10 @@ class IslandRunner:
         self.container_id = container_id
 
         self.writer = RedisStreamWriter(
-            config.broker.url,
+            settings.redis_url,
             stream_key(run_id),
-            buffer_records=config.broker.buffer_records,
-            stall_seconds=config.broker.stall_seconds,
+            buffer_records=settings.broker_buffer_records,
+            stall_seconds=settings.broker_stall_seconds,
         )
         self.logger = EventLogger(
             run_id,
@@ -111,7 +118,7 @@ class IslandRunner:
                 run_id=run_id,
                 island_id=island_id,
                 node_id=self.node_id,
-                connect_timeout=config.execution.connect_timeout_seconds,
+                connect_timeout=CONTROL_CONNECT_TIMEOUT_SECONDS,
             )
 
         self.island_seed = seed_for_island(config.seed, island_id)
@@ -492,12 +499,11 @@ class IslandRunner:
         """
         termination = TerminationReason.MAX_GENERATIONS.value
         population: list[Individual] = []
-        limit = self.config.termination.time_limit_seconds
-        deadline = started + limit if limit is not None else None
+        deadline = started + self.settings.run_time_limit_seconds
 
         try:
             rtt_ns = self._connect_control()
-            ping_broker(self.config.broker.url, self.config.broker.connect_timeout_seconds)
+            ping_broker(self.settings.redis_url, self.settings.broker_connect_timeout_seconds)
             self._log_island_start(rtt_ns)
             self.ctx.generation = 0
             population = self.algorithm.initialize(self.population_size)
@@ -536,7 +542,7 @@ class IslandRunner:
                 now = time.monotonic()
                 if (
                     self.control is not None
-                    and now - last_heartbeat >= self.config.execution.heartbeat_interval_seconds
+                    and now - last_heartbeat >= self.settings.heartbeat_seconds
                 ):
                     last_heartbeat = now
                     if self.control.heartbeat(
@@ -565,7 +571,7 @@ class IslandRunner:
                 if self._reached_target():
                     termination = TerminationReason.TARGET_FITNESS_REACHED.value
                     break
-                if deadline is not None and now >= deadline:
+                if now >= deadline:
                     termination = TerminationReason.TIME_LIMIT.value
                     break
                 if self._stop_reason is not None:

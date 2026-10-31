@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
-import socket
+import os
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from ..config import ISLAND_CONFIG_ENV
+from ..settings import ServiceSettings
 
 __all__ = [
     "DockerBackend",
     "DockerUnavailable",
     "IslandSpec",
     "IslandContainerStatus",
+    "MASTER_CONTAINER_NAME_ENV",
 ]
+
+MASTER_CONTAINER_NAME_ENV = "MASTER_CONTAINER_NAME"
+"""Names the run's master container, when the Runner service started the master in one."""
 
 
 @dataclass
@@ -46,19 +50,7 @@ class DockerBackend:
 
     name = "docker"
 
-    def __init__(
-        self,
-        *,
-        image: str,
-        run_id: str,
-        dockerfile: str = "docker/Dockerfile.island",
-        build_context: str = ".",
-        build: bool = True,
-        build_network: str | None = None,
-        cpus: float = 1.0,
-        memory: str = "2g",
-        repository_root: Path | None = None,
-    ) -> None:
+    def __init__(self, *, run_id: str, settings: ServiceSettings) -> None:
         try:
             import docker
         except ImportError as exc:
@@ -75,101 +67,39 @@ class DockerBackend:
                 "this user is in the `docker` group"
             ) from exc
 
-        self.image = image
+        self.settings = settings
+        self.image = settings.island_image
         self.run_id = run_id
-        self.dockerfile = dockerfile
-        self.build_context = build_context
-        self.build = build
-        self.build_network = build_network
-        self.cpus = cpus
-        self.memory = memory
+        self.cpus = settings.island_cpus
+        self.memory = settings.island_memory
         self.labels = {
             "app": "archipelago",
             "component": "island",
             "archipelago.run_id": run_id,
         }
-        self.repository_root = Path(repository_root or Path(__file__).resolve().parents[2])
 
         self._containers: dict[int, Any] = {}
         self._node_ids: dict[int, str] = {}
-        self._build_log: list[str] = []
         self.network_name: str = f"archipelago-{run_id[-8:]}"
         self.island_network: str = self.network_name
         self._created_network: Any | None = None
         self.master_alias: str | None = None
         self._master_container: Any | None = None
         self._master_networks: list[str] = []
-        self.build_warning: str | None = None
 
 
     def prepare(self) -> None:
-        """Make the island image and the run's network ready, in that order."""
-        self._ensure_image()
-        self._ensure_network()
-
-    def _ensure_image(self) -> None:
-        """Ensure a usable island image exists, building it when asked to."""
+        """Check the island image exists, then make the run's network ready."""
         import docker.errors
 
-        image_exists = True
         try:
             self.client.images.get(self.image)
         except docker.errors.ImageNotFound:
-            image_exists = False
-
-        if not self.build:
-            if not image_exists:
-                raise DockerUnavailable(
-                    f"island image {self.image!r} not found and docker.build is false. "
-                    f"Build it with:  docker build --network=host -f {self.dockerfile} "
-                    f"-t {self.image} ."
-                )
-            self._check_image_freshness()
-            return
-
-        dockerfile_path = self.repository_root / self.dockerfile
-        if not dockerfile_path.exists():
-            if image_exists:
-                self.build_warning = f"dockerfile not found at {dockerfile_path}; using the existing image"
-                return
-            raise DockerUnavailable(f"dockerfile not found: {dockerfile_path}")
-
-        try:
-            _image, logs = self.client.images.build(
-                path=str(self.repository_root / self.build_context),
-                dockerfile=str(dockerfile_path.relative_to(self.repository_root)),
-                tag=self.image,
-                rm=True,
-                pull=False,
-                network_mode=self.build_network,
-            )
-            for entry in logs:
-                line = entry.get("stream") or entry.get("status")
-                if line:
-                    self._build_log.append(str(line).rstrip())
-        except Exception as exc:
-            hint = ""
-            message = str(exc)
-            if "credential" in message.lower() or "credsStore" in message:
-                hint = (
-                    " This looks like a Docker credential-helper problem in ~/.docker/config.json "
-                    "rather than anything about the image itself."
-                )
-            elif "name resolution" in message or "Temporary failure" in message:
-                hint = " The builder cannot resolve DNS; try docker.build_network: host."
-            if image_exists:
-                self.build_warning = (
-                    f"image rebuild failed ({type(exc).__name__}: {exc}); "
-                    f"continuing with the existing {self.image!r}.{hint}"
-                )
-                self._check_image_freshness(prefix=self.build_warning)
-                return
             raise DockerUnavailable(
-                f"could not build island image {self.image!r}: {exc}.{hint} "
-                f"Build it by hand with:  docker build --network=host "
-                f"-f {self.dockerfile} -t {self.image} ."
-            ) from exc
-
+                f"island image {self.image!r} not found. Build it with:  "
+                f"docker build --network=host -f docker/Dockerfile.island -t {self.image} ."
+            ) from None
+        self._ensure_network()
 
     MASTER_ALIAS = "archipelago-master"
 
@@ -177,7 +107,7 @@ class DockerBackend:
         """Decide where the islands live, so that they can reach the master and Redis."""
         master = self._own_container()
 
-        if master is not None:
+        if master is not None and master.attrs["HostConfig"]["NetworkMode"] != "host":
             # Islands also join every network the master is on, so they reach Redis at the
             # address the master uses.
             self._master_networks = sorted(master.attrs["NetworkSettings"]["Networks"])
@@ -199,67 +129,25 @@ class DockerBackend:
         except Exception as exc:
             raise DockerUnavailable(
                 f"the master is running in container {container.id[:12]} but could not join "
-                f"the island network {self.island_network!r}: {exc}. A master container "
-                "started with --network host cannot be attached to another network; start it "
-                "without that flag, or run the master on the host instead."
+                f"the island network {self.island_network!r}: {exc}"
             ) from exc
         self._master_container = container
         self.master_alias = self.MASTER_ALIAS
 
     def _own_container(self) -> Any | None:
-        """The container this process is running in, or None when on the host."""
-        if not Path("/.dockerenv").exists():
+        """The master's own container, or None when the master runs on the host.
+
+        The Runner service names the container when it starts a master in one. A master in a
+        container on the host's network is treated like one on the host: its islands share that
+        network too.
+        """
+        name = os.environ.get(MASTER_CONTAINER_NAME_ENV)
+        if name is None:
             return None
         try:
-            return self.client.containers.get(socket.gethostname())
-        except Exception:
-            return None
-
-    _IMAGE_SOURCES = (
-        "archipelago_logging",
-        "algorithms",
-        "benchmarks",
-        "orchestrator",
-        "requirements-island.txt",
-    )
-
-    def _check_image_freshness(self, prefix: str | None = None) -> None:
-        """Warn when the island image predates the source it was built from."""
-        import datetime
-        import re
-
-        try:
-            image = self.client.images.get(self.image)
-            created = re.sub(r"\.\d+", "", image.attrs.get("Created", ""))
-            image_time = datetime.datetime.fromisoformat(
-                created.replace("Z", "+00:00")
-            ).timestamp()
-        except Exception:
-            return
-
-        newest = 0.0
-        newest_path = ""
-        for relative in self._IMAGE_SOURCES:
-            root = self.repository_root / relative
-            if not root.exists():
-                continue
-            candidates = root.rglob("*.py") if root.is_dir() else [root]
-            for candidate in candidates:
-                try:
-                    mtime = candidate.stat().st_mtime
-                except OSError:
-                    continue
-                if mtime > newest:
-                    newest, newest_path = mtime, str(candidate.relative_to(self.repository_root))
-
-        if newest > image_time:
-            age = newest - image_time
-            message = (
-                f"island image {self.image!r} was built {age / 60:.1f} minutes before the newest "
-                f"source file ({newest_path}); the containers will run stale code. Rebuild with: "
-                f"docker build --network=host -f {self.dockerfile} -t {self.image} ."
-            )
-            self.build_warning = f"{prefix} {message}" if prefix else message
+            return self.client.containers.get(name)
+        except Exception as exc:
+            raise DockerUnavailable(f"cannot find the master's own container {name!r}: {exc}") from exc
 
     @staticmethod
     def container_name(run_id: str, island_id: int) -> str:
@@ -280,6 +168,7 @@ class DockerBackend:
         ]
         container_name = self.container_name(spec.run_id, spec.island_id)
         environment = {
+            **self.settings.to_env(),
             "PYTHONUNBUFFERED": "1",
             "IN_ARCHIPELAGO_CONTAINER": "1",
             "ISLAND_CONTAINER_NAME": container_name,
@@ -394,5 +283,4 @@ class DockerBackend:
             "master_networks": self._master_networks,
             "master_in_container": self.master_alias is not None,
             "labels": self.labels,
-            "build_warning": self.build_warning,
         }

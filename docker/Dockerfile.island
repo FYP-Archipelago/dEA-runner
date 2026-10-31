@@ -1,8 +1,10 @@
-# Island image: one container per island.
-# Build:
-#   docker build -f docker/Dockerfile.island -t archipelago-island:latest .
+# Island image: one container per island, created by each run's master.
 #
-# The master builds it automatically when docker.build is true.
+#   docker build --network=host -f docker/Dockerfile.island -t archipelago-island:latest .
+#
+# `docker compose up --build` builds it with the Runner image; the Runner never builds images
+# itself. The island gets the run's config in ISLAND_CONFIG and the Runner's settings in the rest
+# of its environment.
 
 FROM python:3.12-slim
 

@@ -114,11 +114,14 @@ def build_field_reference() -> str:
 
 def _example_records(image: str, broker_url: str) -> dict[str, list[dict[str, Any]]]:
     """Capture one real record of each type by running a tiny archipelago."""
+    from archipelago_logging import new_run_id
     from orchestrator.config import RunConfig
     from orchestrator.master import Master
     from orchestrator.redis_stream import read_stream
+    from orchestrator.settings import ServiceSettings
 
     config = RunConfig(
+        run_id=new_run_id(),
         algorithm="de",
         benchmark="sphere",
         benchmark_params={"dimension": 3},
@@ -134,10 +137,9 @@ def _example_records(image: str, broker_url: str) -> dict[str, list[dict[str, An
             "selection": "best",
             "replacement": "worst",
         },
-        docker={"image": image, "build": False},
-        broker={"url": broker_url},
     )
-    summary = Master(config, repository_root=REPOSITORY_ROOT).run()
+    settings = ServiceSettings(redis_url=broker_url, island_image=image)
+    summary = Master(config, settings).run()
 
     examples: dict[str, list[dict[str, Any]]] = {}
     for record in read_stream(broker_url, summary.stream_key):

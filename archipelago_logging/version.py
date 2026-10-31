@@ -4,4 +4,4 @@ from __future__ import annotations
 
 SCHEMA_VERSION = "2.0"
 
-HARNESS_VERSION = "0.4.0"
+HARNESS_VERSION = "0.5.0"

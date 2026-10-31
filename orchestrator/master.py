@@ -1,25 +1,33 @@
-"""The master: spins up islands, brokers migration, writes its own records, reports."""
+"""The master: spins up islands, brokers migration, writes its own records, reports.
+
+The Runner service starts one master container per run (``python -m orchestrator.master``),
+with the run's config in ``RUN_CONFIG`` and the service's settings in the environment.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import os
 import platform
+import signal
+import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from archipelago_logging import EventLogger, TerminationReason, iso_now, new_run_id
+from archipelago_logging import EventLogger, TerminationReason, iso_now
 from archipelago_logging.version import HARNESS_VERSION
 
 from .backends import DockerBackend, IslandSpec
-from .config import RunConfig
+from .config import RUN_CONFIG_ENV, RunConfig
 from .control_server import ControlServer
 from .redis_stream import RedisStreamWriter, ping_broker, stream_key, stream_length
+from .settings import ServiceSettings
 from .topology import build_topology, describe_topology
 
-__all__ = ["Master", "RunSummary", "run"]
+__all__ = ["Master", "RunSummary", "main"]
 
 _POLL_SECONDS = 0.5
 
@@ -108,10 +116,10 @@ def _dataset_provenance(config: RunConfig) -> dict[str, Any]:
 class Master:
     """Orchestrates one dEA run."""
 
-    def __init__(self, config: RunConfig, *, repository_root: Path | None = None) -> None:
+    def __init__(self, config: RunConfig, settings: ServiceSettings) -> None:
         self.config = config
-        self.repository_root = Path(repository_root or Path(__file__).resolve().parents[1])
-        self.run_id = config.run_id or new_run_id()
+        self.settings = settings
+        self.run_id = config.run_id
         self.topology = build_topology(
             config.migration.topology, config.num_islands, **config.migration.topology_params
         )
@@ -122,37 +130,26 @@ class Master:
         self.backend: DockerBackend | None = None
         self._node_ids: dict[int, str] = {}
         self._run_started = False
+        self._cancel_requested = threading.Event()
+
+    def request_cancel(self) -> None:
+        """Wind the run down as on the time limit, ending it with ``termination_reason: aborted``.
+
+        Safe from a signal handler: it only sets a flag, which the supervising loop acts on.
+        """
+        self._cancel_requested.set()
 
 
     def _make_backend(self) -> DockerBackend:
-        return DockerBackend(
-            image=self.config.docker.image,
-            run_id=self.run_id,
-            dockerfile=self.config.docker.dockerfile,
-            build_context=self.config.docker.build_context,
-            build=self.config.docker.build,
-            build_network=self.config.docker.build_network,
-            cpus=self.config.docker.cpus,
-            memory=self.config.docker.memory,
-            repository_root=self.repository_root,
-        )
-
-    def _bind_address(self) -> tuple[str, int]:
-        """Where the master listens."""
-        host = self.config.execution.control_host
-        if host in ("127.0.0.1", "localhost"):
-            host = "0.0.0.0"
-        return host, self.config.execution.control_port
+        return DockerBackend(run_id=self.run_id, settings=self.settings)
 
     def _advertise_host(self) -> str:
         """The address islands use to reach the master."""
-        if self.config.execution.advertise_host:
-            return self.config.execution.advertise_host
         alias = getattr(self.backend, "master_alias", None)
         if alias:
             return alias
-        # The master is on the host, and so, on host networking, are its islands.
-        return self.config.execution.control_host
+        # The master is on the host's network, and so are its islands.
+        return "127.0.0.1"
 
 
     def run(self) -> RunSummary:
@@ -173,7 +170,10 @@ class Master:
             failure = exc
             termination = TerminationReason.ERROR.value
         try:
-            stopping = failure is not None or termination == TerminationReason.TIME_LIMIT.value
+            stopping = failure is not None or termination in (
+                TerminationReason.TIME_LIMIT.value,
+                TerminationReason.ABORTED.value,
+            )
             if stopping and self.backend is not None and self.server is not None:
                 self._wind_down()
             island_results = self._collect_results() if self.backend is not None else []
@@ -186,20 +186,20 @@ class Master:
 
     def _preflight(self) -> str:
         """Check Redis and the run's stream before anything starts; open the master's writer."""
-        broker = self.config.broker
+        settings = self.settings
         stream = stream_key(self.run_id)
-        ping_broker(broker.url, broker.connect_timeout_seconds)
-        existing = stream_length(broker.url, stream)
+        ping_broker(settings.redis_url, settings.broker_connect_timeout_seconds)
+        existing = stream_length(settings.redis_url, stream)
         if existing:
             raise FileExistsError(
                 f"run_id {self.run_id!r} has already been used: {stream} holds {existing} entries, "
                 "and run_start must be the first. Choose a new run_id."
             )
         self.writer = RedisStreamWriter(
-            broker.url,
+            settings.redis_url,
             stream,
-            buffer_records=broker.buffer_records,
-            stall_seconds=broker.stall_seconds,
+            buffer_records=settings.broker_buffer_records,
+            stall_seconds=settings.broker_stall_seconds,
         )
         self.logger = EventLogger(self.run_id, "master", self.writer)
         return stream
@@ -207,13 +207,12 @@ class Master:
     def _start(self) -> None:
         """Start the control server, prepare Docker, write ``run_start`` and launch the islands."""
         assert self.logger is not None
-        bind_host, bind_port = self._bind_address()
         self.server = ControlServer(
             run_id=self.run_id,
             topology=self.topology,
             logger=self.logger,
-            host=bind_host,
-            port=bind_port,
+            host="0.0.0.0",
+            port=0,
             max_pending_per_island=self.config.migration.max_pending_per_island,
             fanout=self.config.migration.fanout,
             evaluation_budget=self.config.evaluation_budget,
@@ -240,7 +239,6 @@ class Master:
 
         self.backend = self._make_backend()
         self.backend.prepare()
-        build_warning = getattr(self.backend, "build_warning", None)
 
         self.logger.run_start(
             started_at=iso_now(),
@@ -264,6 +262,7 @@ class Master:
                     "advertise_host": self._advertise_host(),
                     "budget_plan": self.config.budget_plan(),
                     "backend": self.backend.describe(),
+                    "settings": self.settings.described(),
                 },
             },
             host=_host_facts(),
@@ -272,9 +271,6 @@ class Master:
         # Wait until Redis holds run_start: a broken or full Redis fails the run here, before
         # any island container starts.
         self.logger.flush()
-
-        if build_warning:
-            self.logger.diagnostic(build_warning, level="warning")
 
         advertise = self._advertise_host()
         for island_id in range(self.config.num_islands):
@@ -296,15 +292,18 @@ class Master:
 
 
     def _supervise(self, started: float) -> str:
-        """Wait until every island is done, or the wall-clock limit expires."""
+        """Wait until every island is done, the run is cancelled, or the time limit expires."""
         assert self.backend is not None and self.writer is not None and self.logger is not None
-        limit = self.config.termination.time_limit_seconds
-        deadline = started + limit if limit is not None else None
+        limit = self.settings.run_time_limit_seconds
+        deadline = started + limit
         while True:
             self.writer.raise_if_failed()
             if not self._islands_still_running():
                 return TerminationReason.COMPLETED.value
-            if deadline is not None and time.monotonic() >= deadline:
+            if self._cancel_requested.is_set():
+                self.logger.diagnostic("run cancelled; asking islands to wind down", level="warning")
+                return TerminationReason.ABORTED.value
+            if time.monotonic() >= deadline:
                 self.logger.diagnostic(
                     "wall-clock limit reached; asking islands to wind down",
                     level="warning",
@@ -327,14 +326,14 @@ class Master:
         """Stop the islands, and wait for each to say goodbye or die: the barrier before ``run_end``.
 
         Islands are asked to finish their generation (the heartbeat flag, and SIGTERM for any that
-        cannot hear it) and get ``shutdown_grace_seconds`` to flush their records and say goodbye.
+        cannot hear it) and get ``bye_timeout_seconds`` to flush their records and say goodbye.
         An island still silent after that is killed. On the normal path the barrier is already
         met when :meth:`_supervise` returns: every island has said goodbye or exited.
         """
         assert self.backend is not None and self.server is not None
         self.server.stop_requested.set()
         self.backend.signal_all("SIGTERM")
-        grace = self.config.execution.shutdown_grace_seconds
+        grace = self.settings.bye_timeout_seconds
         gives_up_at = time.monotonic() + grace
         while running := self._islands_still_running():
             if time.monotonic() >= gives_up_at:
@@ -500,8 +499,8 @@ class Master:
             "islands reach the master over the run's private Docker network, as "
             f"{getattr(self.backend, 'master_alias', None)!r}"
             if getattr(self.backend, "master_alias", None)
-            else "islands share the host's network and reach a host master at "
-            "execution.control_host; check advertise_host and any firewall on that address"
+            else "islands share the host's network and reach the master at 127.0.0.1; "
+            "check for a firewall on that address"
         )
         self.logger.diagnostic(
             "no island ever connected to the master, so no migration took place; "
@@ -521,6 +520,30 @@ class Master:
             return False
 
 
-def run(config: RunConfig, *, repository_root: Path | None = None) -> RunSummary:
-    """Convenience wrapper: build a :class:`Master` and run it."""
-    return Master(config, repository_root=repository_root).run()
+def main() -> int:
+    """Run the master of one run, in the container the Runner service started for it.
+
+    SIGTERM cancels the run (the service sends it). Exits 1 when the run failed, printing why as
+    the last line; the service reads that line when the run could not even end its stream.
+    """
+    try:
+        config = RunConfig.model_validate_json(os.environ[RUN_CONFIG_ENV])
+        master = Master(config, ServiceSettings.from_env())
+    except Exception as exc:
+        print(f"run failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        return 1
+    signal.signal(signal.SIGTERM, lambda _signum, _frame: master.request_cancel())
+    try:
+        summary = master.run()
+    except Exception as exc:
+        print(f"run failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        return 1
+    if summary.error is not None:
+        print(summary.error, file=sys.stderr, flush=True)
+        return 1
+    print(f"run {summary.run_id} ended: {summary.termination_reason}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

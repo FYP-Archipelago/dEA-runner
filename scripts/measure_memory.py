@@ -2,7 +2,7 @@
 """Measure what runs cost in Redis memory.
 
 Watches a Redis while runs append to it: samples ``INFO memory`` throughout and, once the
-expected number of new ``run:*:raw`` streams have ended (``run_end`` is their last entry),
+expected number of new ``run:*:runner_logs`` streams have ended (``run_end`` is their last entry),
 reports each stream's ``XLEN``, ``MEMORY USAGE``, record bytes and bytes per entry, and Redis's
 ``used_memory`` before, at its peak and after. Streams that existed before it started are
 ignored, and nothing is deleted.
@@ -11,11 +11,11 @@ The runs are started either by hand, in another terminal, or by the script itsel
 ``--start`` command is launched once the baseline is taken, all of them at the same time.
 
     python scripts/measure_memory.py --runs 1 \\
-        --start "docker compose run --rm master run --config config/full_dataset.yaml"
+        --start "python scripts/dummy_backend.py run full_dataset"
 
     python scripts/measure_memory.py --runs 2 --json two.json \\
-        --start "docker compose run --rm master run --config config/ga_tsp.yaml" \\
-        --start "docker compose run --rm master run --config config/gp_yacht.yaml"
+        --start "python scripts/dummy_backend.py run ga_tsp" \\
+        --start "python scripts/dummy_backend.py run gp_yacht"
 
 Redis is found from ``--redis-url``, else ``$REDIS_URL``, else the compose stack's ``.env``
 (``REDIS_PASSWORD``, ``REDIS_HOST_PORT``), so the password need not go on a command line. Uses
@@ -38,7 +38,7 @@ from typing import Any
 import redis
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-PATTERN = "run:*:raw"
+PATTERN = "run:*:runner_logs"
 PROJECTED_BUDGET = 500_000
 
 
