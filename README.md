@@ -41,8 +41,11 @@ The API (all JSON; every error is `{"error": "<readable message>"}`):
 | `GET /presets` | The presets and the overrides a run may set, with bounds | 200 |
 | `POST /runs` `{run_id, preset, overrides}` | Starts a run (at most 2 at once, the rest queue) | 202 run · 422 · 409 · 503 |
 | `GET /runs/{run_id}` | The run: `{run_id, state, error}`, state `queued` · `running` · `finished` · `failed` · `cancelled` | 200 · 404 · 503 |
-| `POST /runs/{run_id}/cancel` | Cancels it; a running run winds down and its stream still ends with `run_end` | 202 · 200 · 404 |
+| `POST /runs/{run_id}/cancel` | Cancels it; a running run winds down and its stream still ends with `run_end` | 202 · 200 · 404 · 503 |
 | `GET /health` | Whether the Runner can reach Redis | 200 · 503 |
+
+The Swagger UI at `http://127.0.0.1:8000/docs` documents every endpoint, status and body, and can
+send requests; the OpenAPI document is `/openapi.json`.
 
 **Stopping Redis deletes every stream.** It keeps everything in memory, so `docker compose
 stop`, `restart` and `down`, and Ctrl+C on an attached `docker compose up`, all empty it.

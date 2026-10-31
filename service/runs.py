@@ -211,9 +211,14 @@ class RunQueue:
             raise BrokerUnavailable(f"cannot reach Redis: {exc}") from exc
 
     def _stream_outcome(self, run_id: str) -> tuple[str, str | None] | None:
-        """How the run ended, from its stream's ``run_end``; None if the stream has none."""
+        """How the run ended, from its stream's ``run_end``; None if the stream has none.
+
+        ``completed`` is finished and ``aborted`` cancelled; anything else — ``error``, and
+        ``time_limit``, which the backend also treats as a failure — is failed, with
+        ``run_end.error`` as the reason.
+        """
         try:
-            entries = self.redis.xrevrange(stream_key(run_id), count=2)
+            entries = self.redis.xrevrange(stream_key(run_id), count=1)
         except redis.RedisError as exc:
             raise BrokerUnavailable(f"cannot reach Redis: {exc}") from exc
         if not entries:
@@ -226,14 +231,7 @@ class RunQueue:
             return FINISHED, None
         if reason == "aborted":
             return CANCELLED, None
-        if reason == "time_limit":
-            return FAILED, (
-                f"stopped by the Runner's time limit of {self.settings.run_time_limit_seconds:g} s"
-            )
-        previous = json.loads(entries[1][1][b"data"]) if len(entries) > 1 else {}
-        if previous.get("type") == "diagnostic" and previous.get("level") == "error":
-            return FAILED, previous.get("message")
-        return FAILED, f"the run ended with termination_reason {reason!r}"
+        return FAILED, last.get("error") or f"the run ended with termination_reason {reason!r}"
 
     def _capacity_for(self, run: Run) -> bool:
         running = [other for other in self._runs.values() if other.state == RUNNING]

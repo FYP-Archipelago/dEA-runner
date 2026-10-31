@@ -50,7 +50,7 @@ class RunSummary:
     per_island: dict[str, Any] = field(default_factory=dict)
     island_results: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
-    """Why the run failed, readable by a person; None unless ``termination_reason`` is error."""
+    """Why the run failed, readable by a person; None unless ``termination_reason`` is error or time_limit; the same text as ``run_end.error``."""
 
 
 def _failure_text(failure: Exception | None, failed_islands: list[dict[str, Any]]) -> str:
@@ -434,18 +434,18 @@ class Master:
                     "algorithm_summary": result.get("algorithm_summary"),
                 }
 
+        error = self._error_text(termination, failure, failed_islands)
         if self.server is not None:
             self.server.stop()  # no island is left to talk to, and nothing may follow run_end
         # Closing records only follow a run_start: a stream must never begin with anything else.
         if self._run_started and self.server is not None and not self.writer.failed:
             self._warn_if_no_island_ever_connected()
             if termination == TerminationReason.ERROR.value:
-                self.logger.diagnostic(
-                    _failure_text(failure, failed_islands), level="error", islands_failed=failed
-                )
+                self.logger.diagnostic(error, level="error", islands_failed=failed)
             self.logger.run_end(
                 ended_at=iso_now(),
                 termination_reason=termination,
+                error=error,
                 wallclock_seconds=elapsed,
                 islands_completed=completed,
                 islands_failed=failed,
@@ -475,8 +475,21 @@ class Master:
             global_best_island=best_island,
             per_island=per_island,
             island_results=island_results,
-            error=_failure_text(failure, failed_islands) if failed or failure else None,
+            error=error,
         )
+
+    def _error_text(
+        self, termination: str, failure: Exception | None, failed_islands: list[dict[str, Any]]
+    ) -> str | None:
+        """Why the run failed, for ``run_end.error`` and the service; None unless it failed.
+
+        The backend treats a time-limited run as failed, so it gets a reason too.
+        """
+        if termination == TerminationReason.ERROR.value:
+            return _failure_text(failure, failed_islands)
+        if termination == TerminationReason.TIME_LIMIT.value:
+            return f"stopped by the Runner's time limit of {self.settings.run_time_limit_seconds:g} s"
+        return None
 
     def _release(self) -> None:
         """Stop the control server and remove the run's containers and network."""

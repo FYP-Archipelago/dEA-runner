@@ -80,7 +80,8 @@ class ServiceSettings(BaseModel):
     run_time_limit_seconds: float = Field(
         default=3600.0,
         gt=0.0,
-        description="Backstop: a run still going after this long is wound down and reported failed, so a run nobody cancels cannot hold a slot forever.",
+        le=86_400.0,
+        description="Always on: a run still going after this long is wound down, its stream ended with run_end (termination_reason time_limit), and reported failed. An island that hangs never says goodbye, so without it a run could wait forever. At most a day, so it cannot be switched off in effect.",
     )
 
     @classmethod

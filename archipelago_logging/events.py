@@ -259,6 +259,10 @@ class RunEndEvent(BaseEvent):
     type: Literal["run_end"] = "run_end"
     ended_at: str
     termination_reason: str
+    error: str | None = Field(
+        default=None,
+        description="Why the run failed, in words fit to show a user; absent unless termination_reason is error or time_limit. For error: what the master hit, then why each failed island failed, the same text as the error diagnostic just before run_end. For time_limit: that the Runner's time limit stopped the run.",
+    )
     wallclock_seconds: float
     islands_completed: int
     islands_failed: int
