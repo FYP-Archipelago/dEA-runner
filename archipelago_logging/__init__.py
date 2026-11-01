@@ -47,10 +47,10 @@ from .reader import (
     validate_log,
 )
 from .sinks import CallbackSink, Sink, SinkStats
-from .version import HARNESS_VERSION, SCHEMA_VERSION
+from .version import HARNESS_VERSION, SCHEMA_MARKER
 
 __all__ = [
-    "SCHEMA_VERSION",
+    "SCHEMA_MARKER",
     "HARNESS_VERSION",
     "EventLogger",
     "EventType",

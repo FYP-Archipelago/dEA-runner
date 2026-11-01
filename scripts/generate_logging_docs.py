@@ -24,7 +24,6 @@ from archipelago_logging.events import (
     EVENT_MODELS,
     BaseEvent,
 )
-from archipelago_logging.version import SCHEMA_VERSION
 
 DOCUMENT = REPOSITORY_ROOT / "docs" / "LOGGING_FORMAT.md"
 
@@ -251,13 +250,12 @@ def main() -> int:
         )
         if expected != current:
             print(
-                f"{DOCUMENT} is out of date with archipelago_logging.events "
-                f"(schema {SCHEMA_VERSION}).\n"
+                f"{DOCUMENT} is out of date with archipelago_logging.events.\n"
                 "Regenerate it with: python scripts/generate_logging_docs.py --fields-only",
                 file=sys.stderr,
             )
             return 1
-        print(f"{DOCUMENT} is current (schema {SCHEMA_VERSION}).")
+        print(f"{DOCUMENT} is current.")
         return 0
 
     if args.fields_only:
@@ -267,7 +265,7 @@ def main() -> int:
     else:
         updated = render(current, args.image, args.broker_url)
     DOCUMENT.write_text(updated, encoding="utf-8")
-    print(f"Regenerated {DOCUMENT} for schema {SCHEMA_VERSION}.")
+    print(f"Regenerated {DOCUMENT}.")
     return 0
 
 

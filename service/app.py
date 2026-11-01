@@ -115,7 +115,7 @@ class PresetsView(BaseModel):
     """The presets, and every key a request may override with its bounds."""
 
     overrides: dict[str, dict[str, Any]] = Field(
-        description="Each override key's type (int or choice) and its bounds: min, max, choices; "
+        description="Each override key's type (int, bool or choice) and its bounds: min, max, choices; "
         "a bound with no limit is left out, and optional: true marks a key with no default.",
         examples=[OVERRIDES],
     )

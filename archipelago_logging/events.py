@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
-from .version import SCHEMA_VERSION
+from .version import SCHEMA_MARKER
 
 __all__ = [
     "EventType",
@@ -101,9 +101,9 @@ class BaseEvent(BaseModel):
         extra="forbid", use_enum_values=True, validate_assignment=False, allow_inf_nan=False
     )
 
-    schema_version: str = Field(
-        default=SCHEMA_VERSION,
-        description="Schema version this record was written against. See archipelago_logging.version.",
+    schema_version: Literal["2"] = Field(
+        default=SCHEMA_MARKER,
+        description="Always \"2\". Not a version: the format is not versioned. It is here only because the backend's clustering module requires it, and goes once that check does.",
     )
     type: str = Field(description="Event discriminator; one of EventType.")
     run_id: str = Field(description="Identifies the run. Every record in a run shares this value.")

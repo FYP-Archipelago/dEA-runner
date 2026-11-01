@@ -12,7 +12,6 @@ from .events import (
     MigrationSendEvent,
     parse_event,
 )
-from .version import SCHEMA_VERSION
 
 __all__ = [
     "parse_records",
@@ -29,13 +28,7 @@ class LogValidationError(Exception):
 
 def parse_records(records: Iterable[dict[str, Any]]) -> Iterator[BaseEvent]:
     """Validate decoded records into event models, in the order given."""
-    for number, record in enumerate(records, start=1):
-        version = record.get("schema_version", "")
-        if version != SCHEMA_VERSION:
-            raise LogValidationError(
-                f"record {number}: schema_version {version!r}; this reader reads "
-                f"{SCHEMA_VERSION} only"
-            )
+    for record in records:
         yield parse_event(record)
 
 
@@ -117,12 +110,6 @@ def validate_log(
     total = 0
 
     for number, record in enumerate(records, start=1):
-        version = record.get("schema_version", "")
-        if version != SCHEMA_VERSION:
-            raise LogValidationError(
-                f"record {number}: schema_version {version!r}; this reader reads "
-                f"{SCHEMA_VERSION} only"
-            )
         try:
             event = parse_event(record)
         except ValueError as exc:

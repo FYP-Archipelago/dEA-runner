@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from archipelago_logging.genome import DEFAULT_PRECISION_DECIMALS, GenomeLogMode
 from archipelago_logging.ids import check_run_id
-from archipelago_logging.version import HARNESS_VERSION, SCHEMA_VERSION
+from archipelago_logging.version import HARNESS_VERSION
 
 __all__ = [
     "MigrationConfig",
@@ -329,7 +329,6 @@ class RunConfig(_Base):
         """JSON-safe dict of the fully resolved config, for ``run_start.config``."""
         payload = self.model_dump(mode="json")
         payload["_meta"] = {
-            "schema_version": SCHEMA_VERSION,
             "harness_version": HARNESS_VERSION,
         }
         return payload

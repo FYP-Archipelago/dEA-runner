@@ -29,6 +29,7 @@ OVERRIDES: dict[str, dict[str, Any]] = {
     # heaviest preset peaked at 1.21 GB (docs/MEMORY_MEASUREMENTS.md).
     "evaluation_budget": {"type": "int", "min": 1000, "max": 500_000},
     "target_generations": {"type": "int", "min": 2},
+    "migration.enabled": {"type": "bool"},
     "migration.topology": {"type": "choice", "choices": sorted(TOPOLOGIES)},
     "migration.interval": {"type": "int", "min": 1},
     "migration.num_migrants": {"type": "int", "min": 1},
@@ -66,6 +67,10 @@ def _get_path(config: RunConfig, dotted: str) -> Any:
 def _check_override(key: str, value: Any) -> None:
     rule = OVERRIDES[key]
     if value is None and rule.get("optional"):
+        return
+    if rule["type"] == "bool":
+        if not isinstance(value, bool):
+            raise InvalidRequest(f"override {key!r} must be true or false, not {value!r}")
         return
     if rule["type"] == "choice":
         if value not in rule["choices"]:

@@ -44,6 +44,13 @@ def _type(schema: dict[str, Any]) -> str:
     return kind or "any"
 
 
+def _value(value: Any) -> str:
+    """A default as JSON shows it: true, not True; 20,000 for a number."""
+    if isinstance(value, bool):
+        return json.dumps(value)
+    return f"{value:,}" if isinstance(value, int) else str(value)
+
+
 def _cell(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().replace("|", "\\|") or "—"
 
@@ -95,6 +102,8 @@ def build_reference() -> str:
         bounds = [f"{label} {rule[name]:,}" for name, label in (("min", "≥"), ("max", "≤")) if name in rule]
         if "choices" in rule:
             bounds.append(" · ".join(f"`{choice}`" for choice in rule["choices"]))
+        if rule["type"] == "bool":
+            bounds.append("`true` · `false`")
         if rule.get("optional"):
             bounds.append("optional, no default")
         parts.append(f"| `{key}` | {rule['type']} | {', '.join(bounds) or '—'} |")
@@ -103,8 +112,7 @@ def build_reference() -> str:
               "| Preset | Algorithm | Benchmark | " + " | ".join(f"`{key}`" for key in keys) + " |",
               "| --- | --- | --- | " + " | ".join("---" for _ in keys) + " |"]
     for preset in load_presets().values():
-        values = " | ".join(f"{preset.defaults[key]:,}" if isinstance(preset.defaults[key], int)
-                            else str(preset.defaults[key]) for key in keys)
+        values = " | ".join(_value(preset.defaults[key]) for key in keys)
         parts.append(f"| `{preset.name}` | {preset.algorithm} | {preset.benchmark} | {values} |")
     return "\n".join(parts)
 

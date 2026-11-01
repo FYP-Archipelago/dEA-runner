@@ -6,8 +6,8 @@ PSO, GP, ES) as an island model — a master container and one container per isl
 appending every evaluation, migration and summary record, live, to the Redis stream
 `run:{run_id}:runner_logs` that the backend's Worker Pool reads.
 
-**Status:** complete and tested (M1–M6); deploying it where the backend's Redis runs is what is
-left. Start with [`docs/HANDOFF.md`](docs/HANDOFF.md): what this is, how it works, every decision so
+**Status:** complete and tested (M1–M6), and run end to end against the real Archipelago Backend
+(2026-11-01); deploying it where the backend's Redis runs is what is left. Start with [`docs/HANDOFF.md`](docs/HANDOFF.md): what this is, how it works, every decision so
 far, current status, and what is open.
 
 ## Quick start
@@ -129,7 +129,7 @@ what ufw already allows: `sudo ufw status numbered`.
 | `docs/LOGGING_FORMAT.md` | The record contract: every record type and field, the stream entry format, invariants |
 | `docs/ARCHITECTURE.md` | Why the code is shaped as it is |
 | `docs/ALGORITHMS.md`, `docs/BENCHMARKS.md` | The five algorithms with citations; the benchmarks and instance files |
-| `docs/MEMORY_MEASUREMENTS.md` | What runs cost in Redis memory, per preset and at the budget cap |
+| `docs/MEMORY_MEASUREMENTS.md` | What runs cost: Redis per preset and at the cap, and the whole platform's memory by component |
 | `docs/IMPLEMENTATION_PLAN.md` | The remaining work, module by module |
 
 `docs/` (including the handoff) and `tests/` are gitignored, so they exist only in the project

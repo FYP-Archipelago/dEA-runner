@@ -63,7 +63,13 @@ _TAIL_ENTRIES = 8
 
 
 def _runner_record(entry: tuple[bytes, dict[bytes, bytes]]) -> dict[str, Any] | None:
-    """The record a stream entry carries if the Runner wrote it, else None."""
+    """The record a stream entry carries if the Runner wrote it, else None.
+
+    The backend's abort (``kind: abort``, ``data: {"error": …}``) is not, and neither is anything
+    else without a record's ``type`` and ``seq``.
+    """
+    if entry[1].get(b"kind") == b"abort":
+        return None
     data = entry[1].get(b"data")
     try:
         record = json.loads(data) if data is not None else None

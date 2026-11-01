@@ -348,14 +348,15 @@ class Master:
             time.sleep(_POLL_SECONDS)
 
     def _collect_results(self) -> list[dict[str, Any]]:
-        """Each island's result, as it arrived in its goodbye.
+        """Each launched island's result, as it arrived in its goodbye.
 
         An island that never said goodbye crashed before it could; its container's exit code
-        and last output, read before the container is removed, say why.
+        and last output, read before the container is removed, say why. Islands never launched
+        (the run failed first) have no result: the run's own error says why.
         """
         assert self.server is not None and self.backend is not None
         results: list[dict[str, Any]] = []
-        for island_id in range(self.config.num_islands):
+        for island_id in sorted(self._node_ids):
             reported = self.server.islands[island_id].result
             if reported is not None:
                 results.append(reported)
@@ -499,8 +500,17 @@ class Master:
             self.backend.cleanup()
 
     def _note(self, message: str, **context: Any) -> None:
-        """A diagnostic, unless the master's writer has already failed."""
-        if self.logger is not None and self.writer is not None and not self.writer.failed:
+        """A diagnostic, once ``run_start`` is written and unless the writer has failed.
+
+        A stream must begin with ``run_start``: when the run fails before it (the island image is
+        missing, say), the reason goes to the master's own output and the service, not the stream.
+        """
+        if (
+            self._run_started
+            and self.logger is not None
+            and self.writer is not None
+            and not self.writer.failed
+        ):
             self.logger.diagnostic(message, **context)
 
     def _warn_if_no_island_ever_connected(self) -> None:
