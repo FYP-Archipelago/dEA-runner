@@ -22,7 +22,6 @@ from .events import (
 )
 from .genome import EncodedGenome
 from .sinks import Sink
-from .version import SCHEMA_MARKER
 
 __all__ = ["EventLogger"]
 
@@ -87,7 +86,6 @@ class EventLogger:
         fields.setdefault("node_id", self.node_id)
 
         with self._lock:
-            fields["schema_version"] = SCHEMA_MARKER
             fields["run_id"] = self.run_id
             fields["emitter"] = self.emitter
             fields["seq"] = self._seq
