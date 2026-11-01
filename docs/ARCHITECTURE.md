@@ -244,5 +244,6 @@ Making that identical would need synchronous migration, which changes the model 
 * **Non-island topologies** (master–slave, cellular): future work.
 * **A global sequence number**: it would need the cross-container synchronisation the design
   avoids; order is per emitter, plus clock-corrected `t_wall`.
-* **Multi-objective**: `objectives` is reserved, unused.
+* **Multi-objective**: every algorithm is single-objective, so records carry one `fitness`, no
+  objective vector.
 * **A versioned record format**: there is one format, and records carry no version.

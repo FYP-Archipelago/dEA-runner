@@ -60,7 +60,7 @@ class IslandResult:
     error: str | None = None
 
 
-def resolve_node_id(island_id: int) -> str:
+def resolve_node_id() -> str:
     """Identify the physical node this island runs on."""
     name = os.environ.get("ISLAND_CONTAINER_NAME")
     if name:
@@ -89,7 +89,7 @@ class IslandRunner:
         self.island_id = island_id
         self.run_id = run_id
         self.control_address = control_address
-        self.node_id = resolve_node_id(island_id)
+        self.node_id = resolve_node_id()
         if container_id is None and (
             os.path.exists("/.dockerenv") or os.environ.get("IN_ARCHIPELAGO_CONTAINER")
         ):
@@ -380,7 +380,6 @@ class IslandRunner:
                 replaced_individual_ids=replaced_ids,
                 migrant_fitnesses=[float(individual.fitness) for individual in incoming],
                 replacement_policy=policy.replacement,
-                accepted=True,
                 latency_seconds=latency,
                 generational_drift=generation - int(delivery["source_generation"]),
             )

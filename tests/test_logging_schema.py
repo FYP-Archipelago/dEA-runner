@@ -75,7 +75,6 @@ def test_none_valued_fields_are_omitted_not_null():
         )
     )
     record = json.loads(evaluation.to_json_line())
-    assert "objectives" not in record
     assert "feasible" not in record
     assert not any(value is None for value in record.values())
 
@@ -154,7 +153,6 @@ def test_parse_event_round_trips_every_type():
                 origin_individual_ids=[],
                 arrived_individual_ids=[],
                 replacement_policy="worst",
-                accepted=True,
             ),
             "island_end": dict(
                 termination_reason="completed",
@@ -240,7 +238,6 @@ def test_migration_is_two_events_joined_by_one_id():
             origin_individual_ids=["x"],
             arrived_individual_ids=["y"],
             replacement_policy="worst",
-            accepted=True,
         )
     )
     assert send.migration_id == arrive.migration_id

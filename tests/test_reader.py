@@ -94,7 +94,6 @@ def _valid_records(*, with_run_end=True, migrations=True, evaluations=0) -> list
             origin_individual_ids=["i00-g000001-n000000000"],
             arrived_individual_ids=["i01-g000003-n000000009"],
             replacement_policy="worst",
-            accepted=True,
             generational_drift=2,
             latency_seconds=0.25,
         )

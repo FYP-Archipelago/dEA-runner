@@ -42,8 +42,8 @@ class MigrationEdge:
 
     @property
     def delivered(self) -> bool:
-        """True once the destination accepted the transfer."""
-        return self.arrive is not None and bool(self.arrive.accepted)
+        """True once the destination integrated the migrants."""
+        return self.arrive is not None
 
     @property
     def source_island(self) -> int:

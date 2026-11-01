@@ -188,7 +188,6 @@ One individual was evaluated. The atomic unit of the whole format.
 | `operator` | `string` | yes | What produced this individual; see Operator. |
 | `fitness` | `number` | yes | The value the search optimises. For a constrained problem this is the PENALISED objective; see `objective` for the raw one. Orientation is given by generation_end.maximising. |
 | `objective` | `number \| null` | no | The raw, unpenalised objective value. Equal to `fitness` for an unconstrained problem, and omitted there. |
-| `objectives` | `number[] \| null` | no | Raw objective vector for multi-objective problems. None for single objective. Reserved: no shipped algorithm is multi-objective in this phase. |
 | `feasible` | `boolean \| null` | no | Constraint satisfaction, where the problem defines constraints (e.g. the knapsack capacity). None where the problem is unconstrained. |
 | `constraint_violation` | `number \| null` | no | Total violation magnitude; 0.0 when feasible. |
 | `eval_index` | `integer` | yes | Per-island monotonic evaluation counter, gap-free. This is the index of the point in the island's search trajectory. |
@@ -267,8 +266,6 @@ Migrants were integrated into the destination island's population.
 | `replaced_individual_ids` | `stringing[]` | no | Individuals evicted from the destination population to make room. Empty if the replacement policy grew the population instead. |
 | `migrant_fitnesses` | `number[]` | no | — |
 | `replacement_policy` | `string` | yes | — |
-| `accepted` | `boolean` | yes | False when the destination rejected the transfer entirely. |
-| `rejected_reason` | `string \| null` | no | — |
 | `latency_seconds` | `number \| null` | no | Wall-clock in-flight time, corrected with the two islands' clock offsets. Null if either offset is unknown. |
 | `generational_drift` | `integer \| null` | no | dest_generation - source_generation. |
 
@@ -632,7 +629,6 @@ Two real records: an initial individual, which has no parents, and a later one.
     4.108123381596498
   ],
   "replacement_policy": "worst",
-  "accepted": true,
   "latency_seconds": 0.17498493194580078,
   "generational_drift": -1
 }
@@ -919,7 +915,8 @@ in `island_start.island_seed`.
 * **Added:** `seq` and `t_mono_ns` (reliable ordering and durations), `island_end` (so a finished
   island is distinguishable from a truncated log) and `diagnostic` (operational messages in the
   same ordered stream; analysis ignores them).
-* **Single-objective.** `evaluation.objectives` is reserved; nothing fills it.
+* **Single-objective.** An evaluation carries one `fitness` (and its raw `objective`); there is no
+  objective vector.
 * **Clock correction is advisory:** `clock_offset_ns` is a round-trip estimate taken once at island
   start (± `clock_offset_rtt_ns / 2`); timestamps are raw, and long runs drift.
 * **Population membership is implicit:** rows say who was created; survival shows in later

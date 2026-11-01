@@ -7,7 +7,6 @@ import socket
 from typing import Any, Iterator
 
 __all__ = [
-    "PROTOCOL_VERSION",
     "Op",
     "encode",
     "send_message",
@@ -15,8 +14,6 @@ __all__ = [
     "iter_messages",
     "ProtocolError",
 ]
-
-PROTOCOL_VERSION = "1.0"
 
 
 class ProtocolError(RuntimeError):

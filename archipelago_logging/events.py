@@ -291,10 +291,6 @@ class EvaluationEvent(IslandEvent):
         default=None,
         description="The raw, unpenalised objective value. Equal to `fitness` for an unconstrained problem, and omitted there.",
     )
-    objectives: list[float] | None = Field(
-        default=None,
-        description="Raw objective vector for multi-objective problems. None for single objective. Reserved: no shipped algorithm is multi-objective in this phase.",
-    )
     feasible: bool | None = Field(
         default=None,
         description="Constraint satisfaction, where the problem defines constraints (e.g. the knapsack capacity). None where the problem is unconstrained.",
@@ -419,8 +415,6 @@ class MigrationArriveEvent(IslandEvent):
     )
     migrant_fitnesses: list[float] = Field(default_factory=list)
     replacement_policy: str
-    accepted: bool = Field(description="False when the destination rejected the transfer entirely.")
-    rejected_reason: str | None = None
     latency_seconds: float | None = Field(
         default=None,
         description="Wall-clock in-flight time, corrected with the two islands' clock offsets. Null if either offset is unknown.",
