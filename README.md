@@ -6,9 +6,9 @@ PSO, GP, ES) as an island model — a master container and one container per isl
 appending every evaluation, migration and summary record, live, to the Redis stream
 `run:{run_id}:runner_logs` that the backend's Worker Pool reads.
 
-**Status:** the service is complete (M5); deployment and the final docs pass (M6) remain. Start
-with [`docs/HANDOFF.md`](docs/HANDOFF.md): what this is, how it works, every decision so far,
-current status, and what is left.
+**Status:** complete and tested (M1–M6); deploying it where the backend's Redis runs is what is
+left. Start with [`docs/HANDOFF.md`](docs/HANDOFF.md): what this is, how it works, every decision so
+far, current status, and what is open.
 
 ## Quick start
 
@@ -122,7 +122,9 @@ what ufw already allows: `sudo ufw status numbered`.
 | Document | Covers |
 | --- | --- |
 | `docs/HANDOFF.md` | Context, architecture, decisions, status, open questions, gotchas |
-| `docs/RUNNING.md` | The API, running and reading runs, Docker details, troubleshooting |
+| `docs/API.md` | The API: behaviour, and a reference generated from the service (endpoints, statuses, schemas, bounds, presets) |
+| `docs/DEPLOYMENT.md` | Deploying, operating, upgrading and stopping the Runner; security; a go-live checklist |
+| `docs/RUNNING.md` | Running and reading runs, the dummy backend, Docker details, troubleshooting |
 | `docs/CONFIGURATION.md` | Presets, overrides, and the Runner's settings |
 | `docs/LOGGING_FORMAT.md` | The record contract: every record type and field, the stream entry format, invariants |
 | `docs/ARCHITECTURE.md` | Why the code is shaped as it is |
@@ -133,6 +135,8 @@ what ufw already allows: `sudo ufw status numbered`.
 `docs/` (including the handoff) and `tests/` are gitignored, so they exist only in the project
 owner's checkout.
 
-## Coming next
+## What is still open
 
-M6: deployment alongside the backend's Redis, and a final pass over the docs.
+Deploying the Runner next to the backend's Redis — where is not yet decided; the steps are in
+`docs/DEPLOYMENT.md` — and the backend's agreement to the open items of the API contract
+(`docs/HANDOFF.md` §8–9).

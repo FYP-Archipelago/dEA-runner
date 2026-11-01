@@ -58,6 +58,20 @@ class BrokerUnavailable(Exception):
     """Redis cannot be reached, so the request cannot be answered safely (503)."""
 
 
+_TAIL_ENTRIES = 8
+"""How many of a stream's last entries are searched for the Runner's own last record."""
+
+
+def _runner_record(entry: tuple[bytes, dict[bytes, bytes]]) -> dict[str, Any] | None:
+    """The record a stream entry carries if the Runner wrote it, else None."""
+    data = entry[1].get(b"data")
+    try:
+        record = json.loads(data) if data is not None else None
+    except ValueError:
+        return None
+    return record if isinstance(record, dict) and "type" in record and "seq" in record else None
+
+
 def master_container_name(run_id: str) -> str:
     """The run's master container, named like its islands."""
     return f"archipelago-{run_id[-8:]}-master"
@@ -215,16 +229,16 @@ class RunQueue:
 
         ``completed`` is finished and ``aborted`` cancelled; anything else — ``error``, and
         ``time_limit``, which the backend also treats as a failure — is failed, with
-        ``run_end.error`` as the reason.
+        ``run_end.error`` as the reason. Entries the Runner did not write (the backend's
+        ``abort``, in whatever shape) are looked past: the backend may write one while a master is
+        still running, during a Runner restart say, and the master's ``run_end`` lands after it.
         """
         try:
-            entries = self.redis.xrevrange(stream_key(run_id), count=1)
+            entries = self.redis.xrevrange(stream_key(run_id), count=_TAIL_ENTRIES)
         except redis.RedisError as exc:
             raise BrokerUnavailable(f"cannot reach Redis: {exc}") from exc
-        if not entries:
-            return None
-        last = json.loads(entries[0][1][b"data"])
-        if last.get("type") != "run_end":
+        last = next((record for record in map(_runner_record, entries) if record is not None), None)
+        if last is None or last.get("type") != "run_end":
             return None
         reason = last.get("termination_reason")
         if reason == "completed":

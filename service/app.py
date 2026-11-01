@@ -43,7 +43,7 @@ Redis stream `run:{run_id}:runner_logs`.
 
 
 class RunRequest(BaseModel):
-    """The body of ``POST /runs``: a preset, and at most the published overrides."""
+    """The body of `POST /runs`: a preset, and at most the published overrides."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -78,7 +78,7 @@ class RunRequest(BaseModel):
 class RunView(BaseModel):
     """A run, as every endpoint about one answers."""
 
-    run_id: str = Field(examples=[_EXAMPLE_RUN_ID])
+    run_id: str = Field(description="The run's id, as given to POST /runs.", examples=[_EXAMPLE_RUN_ID])
     state: Literal["queued", "running", "finished", "failed", "cancelled"] = Field(
         description="queued: waiting for a slot. running: its containers are up and its records "
         "are streaming. finished: ended normally. failed: ended with an error, or stopped by the "
@@ -100,11 +100,12 @@ class ErrorBody(BaseModel):
 class PresetView(BaseModel):
     """One preset, with its value for every override key."""
 
-    preset: str = Field(examples=["docker_de_sphere"])
-    algorithm: str = Field(examples=["de"])
-    benchmark: str = Field(examples=["sphere"])
-    description: str
+    preset: str = Field(description="The name to send as `preset` in POST /runs.", examples=["docker_de_sphere"])
+    algorithm: str = Field(description="ga, de, pso, gp or es.", examples=["de"])
+    benchmark: str = Field(description="The problem it solves.", examples=["sphere"])
+    description: str = Field(description="What the preset runs, in a sentence.")
     defaults: dict[str, Any] = Field(
+        description="The preset's value for every override key that has a default (all but seed).",
         examples=[{"num_islands": 5, "evaluation_budget": 20000, "target_generations": 60,
                    "migration.topology": "ring", "migration.interval": 5, "migration.num_migrants": 3}]
     )
@@ -118,13 +119,13 @@ class PresetsView(BaseModel):
         "a bound with no limit is left out, and optional: true marks a key with no default.",
         examples=[OVERRIDES],
     )
-    presets: list[PresetView]
+    presets: list[PresetView] = Field(description="Every preset, in name order.")
 
 
 class HealthView(BaseModel):
     """Whether the Runner can serve runs."""
 
-    status: Literal["ok", "unavailable"]
+    status: Literal["ok", "unavailable"] = Field(description="ok, or unavailable when Redis cannot be reached.")
     error: str | None = Field(default=None, description="Why not; present only when unavailable.")
 
 
@@ -192,7 +193,13 @@ def create_app(settings: ServiceSettings, *, presets_dir: Path = PRESETS_DIR) ->
     async def _invalid_body(_request: Request, exc: RequestValidationError) -> JSONResponse:
         return _error(422, _validation_message(exc))
 
-    @app.get("/presets", response_model=PresetsView, tags=["presets"], summary="List the presets")
+    @app.get(
+        "/presets",
+        response_model=PresetsView,
+        tags=["presets"],
+        summary="List the presets",
+        responses={200: {"description": "The presets and the override bounds."}},
+    )
     def get_presets() -> dict[str, Any]:
         """The presets the frontend can offer, each with its default for every override key, and
         the overrides a run may set with their bounds."""
@@ -259,7 +266,7 @@ def create_app(settings: ServiceSettings, *, presets_dir: Path = PRESETS_DIR) ->
         response_model=RunView,
         tags=["runs"],
         summary="Get a run's state",
-        responses={**_UNKNOWN_RUN, **_REDIS_DOWN},
+        responses={200: {"description": "The run."}, **_UNKNOWN_RUN, **_REDIS_DOWN},
     )
     def get_run(run_id: str = _RUN_ID_PATH) -> Any:
         """Poll every 2 s. A run this Runner no longer remembers (it restarted) is answered from its
@@ -304,7 +311,10 @@ def create_app(settings: ServiceSettings, *, presets_dir: Path = PRESETS_DIR) ->
         response_model_exclude_none=True,
         tags=["health"],
         summary="Check the Runner can serve runs",
-        responses={503: {"model": HealthView, "description": "Redis is unreachable."}},
+        responses={
+            200: {"description": "The Runner can reach Redis: `{\"status\": \"ok\"}`."},
+            503: {"model": HealthView, "description": "Redis is unreachable."},
+        },
     )
     def health() -> Any:
         """For the container healthcheck: 200 when the Runner is up and can reach Redis."""

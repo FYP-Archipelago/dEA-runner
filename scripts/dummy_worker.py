@@ -48,8 +48,12 @@ class _Run:
 def describe(fields: dict[str, str], run: _Run) -> tuple[str, bool]:
     """One printable line for a stream entry, and whether it ends the run."""
     if set(fields) != {"kind", "data"}:
-        return json.dumps(fields), fields.get("kind") == "abort" or "abort" in fields.values()
-    record = json.loads(fields["data"])
+        # Not a Runner entry: the backend's abort is the only other writer, and a terminator.
+        return json.dumps(fields), "abort" in fields or "abort" in fields.values()
+    try:
+        record = json.loads(fields["data"])
+    except ValueError:
+        return f"(data is not JSON) {json.dumps(fields)}", False
     record_type = record.get("type", "?")
     emitter = record.get("emitter", "?")
     run.types[record_type] += 1
