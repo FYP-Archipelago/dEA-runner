@@ -7,7 +7,6 @@ __pycache__/
 *.zip
 CLAUDE.md
 .env
-tests
 
 # The downloaded benchmark instances ARE committed (~156 KB total), so a clone
 # gets byte-identical data without needing network access. That is deliberate:
