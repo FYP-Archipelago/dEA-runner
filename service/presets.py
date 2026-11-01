@@ -25,9 +25,9 @@ PRESETS_DIR = Path(__file__).resolve().parents[1] / "config"
 
 OVERRIDES: dict[str, dict[str, Any]] = {
     "num_islands": {"type": "int", "min": 4, "max": 6},
-    # The maximum is a Redis memory bound: two concurrent runs at 500,000 evaluations of the
-    # heaviest preset peaked at 1.21 GB (docs/MEMORY_MEASUREMENTS.md).
-    "evaluation_budget": {"type": "int", "min": 1000, "max": 500_000},
+    # The maximum is a memory bound, on the backend's side: at 500,000 one worker needed ~3.8 GB to
+    # cluster a run and two concurrent runs nearly filled its 2 GB Redis (docs/MEMORY_MEASUREMENTS.md).
+    "evaluation_budget": {"type": "int", "min": 1000, "max": 250_000},
     "target_generations": {"type": "int", "min": 2},
     "migration.enabled": {"type": "bool"},
     "migration.topology": {"type": "choice", "choices": sorted(TOPOLOGIES)},
