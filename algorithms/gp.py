@@ -152,7 +152,7 @@ class GeneticProgramming(Algorithm):
         arity = PRIMITIVES[symbol].arity
         return Node(symbol, tuple(self._grow(max_depth - 1, full) for _ in range(arity)))
 
-    def _ramped_half_and_half(self, index: int, population_size: int) -> Node:
+    def _ramped_half_and_half(self, index: int) -> Node:
         """Ramped half-and-half initialisation."""
         depths = list(range(self.min_init_depth, self.max_init_depth + 1))
         chosen_depth = depths[index % len(depths)]
@@ -212,7 +212,7 @@ class GeneticProgramming(Algorithm):
         """Build and evaluate the initial population of trees."""
         return self.ctx.evaluate_all(
             TreeIndividual(
-                genome=self._make(self._ramped_half_and_half(index, population_size)),
+                genome=self._make(self._ramped_half_and_half(index)),
                 operator=Operator.INIT.value,
             )
             for index in range(population_size)

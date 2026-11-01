@@ -1,17 +1,16 @@
 # Benchmark instance files
 
-Real third-party instances, fetched by `scripts/fetch_datasets.py`:
+Real third-party instances, committed to the repository. Check them against
+the manifest with:
 
 ```bash
-python scripts/fetch_datasets.py                # everything
-python scripts/fetch_datasets.py --only tsp     # one group
-python scripts/fetch_datasets.py --verify       # check checksums, download nothing
+pytest tests/test_datasets.py
 ```
 
 `MANIFEST.json` records the source URL, byte size and SHA-256 of every file.
-**That manifest is the point.** Search randomness is deliberately not
-reproducible in this harness; what must be identical between runs is the
-*dataset*, and a checksum is how that is verifiable after the fact rather than
+**That manifest is the point.** A search repeats only with a `seed` and without
+migration, but the *dataset* must be identical between every pair of runs that
+are compared, and a checksum is how that is verifiable after the fact rather than
 assumed. `run_start.datasets` carries the SHA-256 of whichever instance a run
 actually used.
 
@@ -40,7 +39,7 @@ benchmark_params:
 
 TSPLIB's integer rounding is reproduced exactly — `EUC_2D` rounds to the nearest
 integer, `ATT` uses its own pseudo-Euclidean rule — so a tour length from this
-harness is directly comparable with the published optima above. Set
+Runner is directly comparable with the published optima above. Set
 `termination.target_fitness` to one of them to stop as soon as an island solves
 the instance.
 
@@ -144,7 +143,7 @@ will be accepted; a bad set cannot slip through.
 
 ## Adding your own
 
-Any file placed here can be referenced by path from a config. Re-run
-`scripts/fetch_datasets.py --verify` after changing anything, and add new
-downloads to the `DATASETS` list in that script so their provenance is recorded
-rather than lost.
+Any file placed here can be referenced by path from a config. Add an entry for
+it to `MANIFEST.json` — source URL, byte size and SHA-256 — so its provenance is
+recorded rather than lost; `tests/test_datasets.py` then verifies it with the
+rest.

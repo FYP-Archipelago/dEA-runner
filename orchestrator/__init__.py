@@ -1,28 +1,20 @@
-"""Master orchestration: container/process lifecycle, migration, log aggregation."""
+"""Master orchestration: container lifecycle, migration, the run's records."""
 
-from .config import (
-    DockerConfig,
-    ExecutionConfig,
-    LoggingConfig,
-    MigrationConfig,
-    RunConfig,
-    load_config,
-)
+from .config import LoggingConfig, MigrationConfig, RunConfig, TerminationConfig
 from .island_runner import IslandResult, IslandRunner
-from .master import Master, RunSummary, run
+from .master import Master, RunSummary
 from .migration import choose_replacements, select_migrants
+from .settings import ServiceSettings
 from .topology import build_topology, describe_topology
 
 __all__ = [
     "RunConfig",
     "MigrationConfig",
     "LoggingConfig",
-    "ExecutionConfig",
-    "DockerConfig",
-    "load_config",
+    "TerminationConfig",
+    "ServiceSettings",
     "Master",
     "RunSummary",
-    "run",
     "IslandRunner",
     "IslandResult",
     "build_topology",

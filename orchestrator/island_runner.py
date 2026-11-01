@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import socket
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -14,16 +14,9 @@ import numpy as np
 from algorithms.base import Algorithm, Individual, IslandContext
 from algorithms.registry import create_algorithm
 from archipelago_logging import (
-    EVALUATION_CSV_HEADER,
-    CsvFileSink,
     EventLogger,
     GenomePolicy,
     IndividualIdMinter,
-    JsonlFileSink,
-    NullSink,
-    MultiSink,
-    NetworkSink,
-    Sink,
     TerminationReason,
     wall_now,
 )
@@ -32,10 +25,16 @@ from benchmarks.registry import create_problem
 from .config import RunConfig
 from .control_client import ControlClient
 from .migration import choose_replacements, select_migrants
-from .protocol import Role
+from .redis_stream import BrokerError, RedisStreamWriter, ping_broker, stream_key
+from .seeding import seed_for_island
+from .settings import ServiceSettings
 from .topology import build_topology
 
-__all__ = ["IslandRunner", "IslandResult", "build_island_sinks", "resolve_node_id"]
+CONTROL_CONNECT_TIMEOUT_SECONDS = 60.0
+"""How long an island retries the master's control socket at startup before running standalone
+(no migration). Containers can take several seconds to start, so this needs headroom."""
+
+__all__ = ["IslandRunner", "IslandResult", "resolve_node_id"]
 
 
 @dataclass
@@ -61,7 +60,7 @@ class IslandResult:
     error: str | None = None
 
 
-def resolve_node_id(island_id: int) -> str:
+def resolve_node_id() -> str:
     """Identify the physical node this island runs on."""
     name = os.environ.get("ISLAND_CONTAINER_NAME")
     if name:
@@ -72,110 +71,43 @@ def resolve_node_id(island_id: int) -> str:
     return f"{hostname}:{os.getpid()}"
 
 
-def build_island_sinks(
-    config: RunConfig,
-    run_id: str,
-    island_id: int,
-    output_dir: Path,
-    control_address: tuple[str, int] | None,
-) -> tuple[Sink, Sink, list[Sink]]:
-    """Build this island's two sink fan-outs."""
-    import json
-
-    components: list[Sink] = []
-    event_components: list[Sink] = []
-    evaluation_components: list[Sink] = []
-    suffix = ".gz" if config.logging.compress else ""
-
-    if config.logging.write_island_shards:
-        shard = JsonlFileSink(
-            output_dir / "islands" / f"island-{island_id:02d}.jsonl{suffix}",
-            compress=config.logging.compress,
-            flush_interval_seconds=config.logging.flush_interval_seconds,
-        )
-        event_components.append(shard)
-        if config.logging.log_evaluations:
-            evaluation_components.append(
-                CsvFileSink(
-                    output_dir / "islands" / f"island-{island_id:02d}.evaluations.csv{suffix}",
-                    header=EVALUATION_CSV_HEADER,
-                    compress=config.logging.compress,
-                    flush_interval_seconds=config.logging.flush_interval_seconds,
-                )
-            )
-
-    if config.logging.stream_to_master and control_address is not None:
-        for role, targets in (
-            (Role.LOG, event_components),
-            (Role.EVALUATIONS, evaluation_components if config.logging.log_evaluations else None),
-        ):
-            if targets is None:
-                continue
-            handshake = (
-                json.dumps({"role": role, "run_id": run_id, "island_id": island_id}) + "\n"
-            )
-            targets.append(
-                NetworkSink(
-                    control_address[0],
-                    control_address[1],
-                    queue_size=config.logging.network_queue_size,
-                    handshake=handshake,
-                )
-            )
-
-    components = event_components + evaluation_components
-    evaluation_sink: Sink = (
-        MultiSink(evaluation_components) if evaluation_components else NullSink()
-    )
-    return MultiSink(event_components), evaluation_sink, components
-
-
 class IslandRunner:
     """Runs one island to completion."""
 
     def __init__(
         self,
         config: RunConfig,
+        settings: ServiceSettings,
         island_id: int,
         run_id: str,
         *,
-        output_dir: Path,
         control_address: tuple[str, int] | None = None,
-        sink: Sink | None = None,
-        evaluation_sink: Sink | None = None,
         container_id: str | None = None,
     ) -> None:
         self.config = config
+        self.settings = settings
         self.island_id = island_id
         self.run_id = run_id
-        self.output_dir = Path(output_dir)
         self.control_address = control_address
-        self.node_id = resolve_node_id(island_id)
+        self.node_id = resolve_node_id()
         if container_id is None and (
             os.path.exists("/.dockerenv") or os.environ.get("IN_ARCHIPELAGO_CONTAINER")
         ):
             container_id = os.environ.get("ISLAND_CONTAINER_NAME") or socket.gethostname()
         self.container_id = container_id
 
-        if sink is not None:
-            self.sink = sink
-            self.evaluation_sink: Sink | None = evaluation_sink
-            self._sink_components: list[Sink] = [sink]
-            self._owns_sink = False
-        else:
-            self.sink, self.evaluation_sink, self._sink_components = build_island_sinks(
-                config, run_id, island_id, self.output_dir, control_address
-            )
-            self._owns_sink = True
-
+        self.writer = RedisStreamWriter(
+            settings.redis_url,
+            stream_key(run_id),
+            buffer_records=settings.broker_buffer_records,
+            stall_seconds=settings.broker_stall_seconds,
+        )
         self.logger = EventLogger(
             run_id,
             f"island:{island_id}",
-            self.sink,
-            evaluation_sink=self.evaluation_sink,
+            self.writer,
             island_id=island_id,
             node_id=self.node_id,
-            validate=config.logging.validate_events,
         )
 
         self.control: ControlClient | None = None
@@ -186,17 +118,16 @@ class IslandRunner:
                 run_id=run_id,
                 island_id=island_id,
                 node_id=self.node_id,
-                connect_timeout=config.execution.connect_timeout_seconds,
+                connect_timeout=CONTROL_CONNECT_TIMEOUT_SECONDS,
             )
 
-        self.island_seed = int.from_bytes(os.urandom(8), "little")
+        self.island_seed = seed_for_island(config.seed, island_id)
         self.rng = np.random.default_rng(self.island_seed)
 
         self.problem = create_problem(config.benchmark, config.benchmark_params)
         self.genome_policy = GenomePolicy(
             mode=config.logging.genome_mode,
             precision_decimals=config.logging.genome_precision_decimals,
-            sample_every=config.logging.genome_sample_every,
         )
         self.population_size = config.resolved_population_size()
         self.budget = config.budget_per_island()
@@ -210,7 +141,6 @@ class IslandRunner:
             genome_policy=self.genome_policy,
             genome_encoding=None,
             id_minter=IndividualIdMinter(island_id),
-            log_evaluations=config.logging.log_evaluations,
             max_evaluations=self.budget,
         )
 
@@ -241,17 +171,27 @@ class IslandRunner:
 
         self._generations_since_improvement = 0
         self._last_improvement_fitness = self.problem.worst_possible()
+        self._population: list[Individual] = []
+        self._stop_reason: str | None = None
+
+    def request_stop(self, reason: str) -> None:
+        """Ask the island to wind down at the end of its current generation.
+
+        Safe to call from a signal handler: it only sets a flag, and the loop does the logging.
+        """
+        self._stop_reason = reason
 
 
-    def _start_island(self) -> None:
+    def _connect_control(self) -> int | None:
+        """Reach the master, measure the clock offset and report ready; the round trip, if any."""
         if self.control is not None and self.control.connect():
             offset = self.control.measure_offset()
             self.clock_offset_ns = offset.offset_ns
             self.control.ready(self.clock_offset_ns)
-            rtt_ns: int | None = offset.rtt_ns
-        else:
-            rtt_ns = None
+            return offset.rtt_ns
+        return None
 
+    def _log_island_start(self, rtt_ns: int | None) -> None:
         self.logger.island_start(
             algorithm=self.config.algorithm,
             algorithm_params=self.algorithm.describe(),
@@ -271,13 +211,33 @@ class IslandRunner:
             evaluation_budget=self.budget,
         )
 
-    def _finish(self) -> None:
+    def _report(self, result: IslandResult) -> IslandResult:
+        """Wait until Redis holds every record, then say goodbye to the master with the result.
+
+        ``BYE`` therefore means: every record this island will ever write is in Redis. If the
+        flush fails, the result says so instead.
+        """
+        try:
+            self.logger.flush()
+        except BrokerError as exc:
+            if result.error is None:
+                result = dataclasses.replace(
+                    result,
+                    termination_reason=TerminationReason.ERROR.value,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
         if self.control is not None:
-            self.control.bye(generation=self.ctx.generation, evaluations=self.ctx.evaluations)
+            self.control.bye(
+                generation=self.ctx.generation,
+                evaluations=self.ctx.evaluations,
+                result=dataclasses.asdict(result),
+            )
             self.control.close()
-        self.logger.flush()
-        if self._owns_sink:
+        try:
             self.logger.close()
+        except BrokerError:
+            pass  # already in the result
+        return result
 
 
     def _migration_active(self) -> bool:
@@ -420,7 +380,6 @@ class IslandRunner:
                 replaced_individual_ids=replaced_ids,
                 migrant_fitnesses=[float(individual.fitness) for individual in incoming],
                 replacement_policy=policy.replacement,
-                accepted=True,
                 latency_seconds=latency,
                 generational_drift=generation - int(delivery["source_generation"]),
             )
@@ -442,9 +401,6 @@ class IslandRunner:
         fitnesses = np.fromiter(
             (individual.fitness for individual in population), dtype=float, count=len(population)
         )
-        finite = fitnesses[np.isfinite(fitnesses)]
-        if finite.size == 0:
-            finite = np.array([float("nan")])
 
         picker = np.argmax if self.problem.maximising else np.argmin
         best_index = int(picker(fitnesses))
@@ -460,11 +416,11 @@ class IslandRunner:
 
         self.logger.generation_end(
             generation=generation,
-            best_fitness=float(np.max(finite) if self.problem.maximising else np.min(finite)),
-            mean_fitness=float(np.mean(finite)),
-            worst_fitness=float(np.min(finite) if self.problem.maximising else np.max(finite)),
-            median_fitness=float(np.median(finite)),
-            std_fitness=float(np.std(finite)),
+            best_fitness=float(np.max(fitnesses) if self.problem.maximising else np.min(fitnesses)),
+            mean_fitness=float(np.mean(fitnesses)),
+            worst_fitness=float(np.min(fitnesses) if self.problem.maximising else np.max(fitnesses)),
+            median_fitness=float(np.median(fitnesses)),
+            std_fitness=float(np.std(fitnesses)),
             maximising=self.problem.maximising,
             best_individual_id=best.individual_id,
             best_genome_hash=self.genome_policy.encode(
@@ -522,18 +478,35 @@ class IslandRunner:
 
 
     def run(self) -> IslandResult:
-        """Run this island to completion and return its summary."""
+        """Run this island to completion, report to the master, and return the result."""
         started = time.monotonic()
+        try:
+            termination, error = self._evolve(started)
+            result = self._result(termination, error, started)
+            self.logger.island_end(**self._island_end_fields(result))
+        except BrokerError as exc:
+            # Redis is out of reach: nothing more can be logged, but the master can be told.
+            result = self._result(
+                TerminationReason.ERROR.value, f"{type(exc).__name__}: {exc}", started
+            )
+        return self._report(result)
+
+    def _evolve(self, started: float) -> tuple[str, str | None]:
+        """The island loop: the termination reason, and the error text if it failed.
+
+        A ``BrokerError`` propagates: once Redis is gone there is nothing left to log.
+        """
         termination = TerminationReason.MAX_GENERATIONS.value
-        error: str | None = None
         population: list[Individual] = []
-        limit = self.config.termination.time_limit_seconds
-        deadline = started + limit if limit is not None else None
+        deadline = started + self.settings.run_time_limit_seconds
 
         try:
-            self._start_island()
+            rtt_ns = self._connect_control()
+            ping_broker(self.settings.redis_url, self.settings.broker_connect_timeout_seconds)
+            self._log_island_start(rtt_ns)
             self.ctx.generation = 0
             population = self.algorithm.initialize(self.population_size)
+            self._population = population
             self._update_stagnation()
             self._emit_generation_end(population, 0, time.monotonic() - started, 0, 0)
 
@@ -548,6 +521,7 @@ class IslandRunner:
                 self.ctx.evaluations_this_generation = 0
 
                 population = self.algorithm.step(population)
+                self._population = population
                 self._update_stagnation()
 
                 migrants_out = migrants_in = 0
@@ -567,7 +541,7 @@ class IslandRunner:
                 now = time.monotonic()
                 if (
                     self.control is not None
-                    and now - last_heartbeat >= self.config.execution.heartbeat_interval_seconds
+                    and now - last_heartbeat >= self.settings.heartbeat_seconds
                 ):
                     last_heartbeat = now
                     if self.control.heartbeat(
@@ -596,75 +570,75 @@ class IslandRunner:
                 if self._reached_target():
                     termination = TerminationReason.TARGET_FITNESS_REACHED.value
                     break
-                if deadline is not None and now >= deadline:
+                if now >= deadline:
                     termination = TerminationReason.TIME_LIMIT.value
+                    break
+                if self._stop_reason is not None:
+                    termination = TerminationReason.ABORTED.value
+                    self.logger.diagnostic(
+                        f"{self._stop_reason}; stopping at the end of this generation",
+                        level="warning",
+                    )
                     break
             else:
                 termination = TerminationReason.MAX_GENERATIONS.value
 
+        except BrokerError:
+            raise
         except Exception as exc:
-            termination = TerminationReason.ERROR.value
             error = f"{type(exc).__name__}: {exc}"
             self.logger.diagnostic(f"island failed: {error}", level="error")
+            return TerminationReason.ERROR.value, error
+        return termination, None
 
-        summary = self._algorithm_summary(population)
+    def _result(self, termination: str, error: str | None, started: float) -> IslandResult:
+        """What this island reports to the master, from its state now."""
         best = self.ctx.best_individual
-        best_hash = (
-            self.genome_policy.encode(
-                self.algorithm.genome_encoding, self.algorithm.genome_for_log(best)
-            ).genome_hash
-            if best is not None
-            else None
-        )
-        control_channel = {
-            "control_available": bool(self.control and self.control.available),
-            "failed_control_calls": self.control.failed_calls if self.control else 0,
-            "last_control_error": self.control.last_error if self.control else None,
-            "sink_stats": (
-                self.sink.describe() if isinstance(self.sink, MultiSink) else {}
-            ),
-        }
-
-        elapsed = time.monotonic() - started
-        self.logger.island_end(
-            generation=self.ctx.generation,
-            termination_reason=termination,
-            generations_completed=self.ctx.generation,
-            evaluations_total=self.ctx.evaluations,
-            best_fitness=None if best is None else float(best.fitness),
-            best_genome_hash=best_hash,
-            best_individual_id=None if best is None else best.individual_id,
-            best_genome=None if best is None else self.algorithm.best_genome_full(best),
-            migrations_sent=self.migrations_sent,
-            migrations_received=self.migrations_received,
-            migrants_sent=self.migrants_sent,
-            migrants_received=self.migrants_received,
-            wallclock_seconds=elapsed,
-            generations_since_improvement=self._generations_since_improvement,
-            algorithm_summary=summary,
-            control_channel=control_channel,
-        )
-        self._finish()
-
         return IslandResult(
             island_id=self.island_id,
             termination_reason=termination,
             generations_completed=self.ctx.generation,
             evaluations_total=self.ctx.evaluations,
             best_fitness=None if best is None else float(best.fitness),
-            best_genome_hash=best_hash,
+            best_genome_hash=(
+                None
+                if best is None
+                else self.genome_policy.encode(
+                    self.algorithm.genome_encoding, self.algorithm.genome_for_log(best)
+                ).genome_hash
+            ),
             best_individual_id=None if best is None else best.individual_id,
             best_genome=None if best is None else self.algorithm.best_genome_full(best),
             migrations_sent=self.migrations_sent,
             migrations_received=self.migrations_received,
             migrants_sent=self.migrants_sent,
             migrants_received=self.migrants_received,
-            wallclock_seconds=elapsed,
+            wallclock_seconds=time.monotonic() - started,
             generations_since_improvement=self._generations_since_improvement,
-            algorithm_summary=summary,
-            control_channel=control_channel,
+            algorithm_summary=self._algorithm_summary(self._population),
+            control_channel={
+                "control_available": bool(self.control and self.control.available),
+                "failed_control_calls": self.control.failed_calls if self.control else 0,
+                "last_control_error": self.control.last_error if self.control else None,
+            },
             error=error,
         )
+
+    def _island_end_fields(self, result: IslandResult) -> dict[str, Any]:
+        """The ``island_end`` record: the result, plus how the island's writer fared."""
+        fields = dataclasses.asdict(result)
+        fields.pop("island_id")
+        fields.pop("error")
+        fields["generation"] = self.ctx.generation
+        fields["control_channel"] = {
+            **result.control_channel,
+            "broker": {
+                "acknowledged": self.writer.stats.written,
+                "errors": self.writer.stats.errors,
+                "last_error": self.writer.stats.last_error,
+            },
+        }
+        return fields
 
     def _algorithm_summary(self, population: list[Individual]) -> dict[str, Any]:
         """Per-algorithm end-of-run facts, where the algorithm offers any."""

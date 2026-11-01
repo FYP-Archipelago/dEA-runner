@@ -230,7 +230,6 @@ class TSP(PermutationProblem):
 
     def evaluate(self, genome: Sequence[int]) -> ProblemEvaluation:
         """Score one tour by its closed length."""
-        self._evaluations += 1
         tour = np.asarray(genome, dtype=int)
         length = float(np.sum(self._distances[tour, np.roll(tour, -1)]))
         return ProblemEvaluation(fitness=length)

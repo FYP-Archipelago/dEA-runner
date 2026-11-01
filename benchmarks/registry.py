@@ -14,7 +14,6 @@ from .tsp import TSP
 
 __all__ = [
     "register",
-    "register_problem",
     "create_problem",
     "available_benchmarks",
     "benchmark_domain",
@@ -37,16 +36,6 @@ def register(name: str, factory: Callable[..., Problem], domain: Domain) -> None
         raise ValueError(f"benchmark {name!r} is already registered")
     _REGISTRY[key] = factory
     _DOMAINS[key] = domain
-
-
-def register_problem(name: str, domain: Domain) -> Callable[[Callable[..., Problem]], Callable[..., Problem]]:
-    """Decorator form of :func:`register`."""
-    def decorator(factory: Callable[..., Problem]) -> Callable[..., Problem]:
-        """Register the decorated factory and return it unchanged."""
-        register(name, factory, domain)
-        return factory
-
-    return decorator
 
 
 def available_benchmarks() -> dict[str, str]:

@@ -13,7 +13,6 @@ __all__ = [
     "mean_pairwise_hamming",
     "mean_pairwise_position_mismatch",
     "unique_signature_ratio",
-    "fitness_dispersion",
 ]
 
 DEFAULT_SAMPLE_SIZE = 256
@@ -93,15 +92,3 @@ def unique_signature_ratio(signatures: Sequence[str]) -> tuple[float, str, int |
     if not signatures:
         return 0.0, "unique_signature_ratio", None
     return len(set(signatures)) / len(signatures), "unique_signature_ratio", None
-
-
-def fitness_dispersion(fitnesses: Sequence[float]) -> tuple[float, str, int | None]:
-    """Coefficient of variation of fitness; the last-resort, representation-free measure."""
-    values = np.asarray(fitnesses, dtype=float)
-    values = values[np.isfinite(values)]
-    if values.size < 2:
-        return 0.0, "fitness_coefficient_of_variation", None
-    mean = float(np.mean(values))
-    if abs(mean) < 1e-12:
-        return float(np.std(values)), "fitness_std", None
-    return float(np.std(values) / abs(mean)), "fitness_coefficient_of_variation", None

@@ -1,0 +1,36 @@
+# The Runner: one image for the service and for every run's master.
+#
+# The service (the default command) is the HTTP API the Archipelago Backend calls. For each run
+# it starts a master container from this same image (`python -m orchestrator.master`), which
+# creates the run's island containers from docker/Dockerfile.island. docker-compose.yml builds
+# both images and runs the service with Redis.
+#
+#   docker build --network=host -f docker/Dockerfile.runner -t archipelago-runner:latest .
+#
+# The service and the masters need the Docker socket mounted: they create sibling containers
+# (Docker-outside-of-Docker). That grants them effective root on the host, a trade made
+# knowingly; nothing else about a run is shared through the filesystem. Configuration is the
+# environment: see orchestrator/settings.py.
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/archipelago
+
+WORKDIR /archipelago
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY archipelago_logging/ ./archipelago_logging/
+COPY algorithms/ ./algorithms/
+COPY benchmarks/ ./benchmarks/
+COPY orchestrator/ ./orchestrator/
+COPY service/ ./service/
+COPY config/ ./config/
+
+EXPOSE 8000
+
+# Runs as root, deliberately: it needs to reach the mounted Docker socket, whose group id is not
+# knowable at build time.
+CMD ["python", "-m", "service"]

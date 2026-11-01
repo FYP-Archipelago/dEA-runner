@@ -1,31 +1,32 @@
-"""Run configuration: one YAML file, validated at startup, overridable everywhere."""
+"""A run's configuration: what its preset and the backend's overrides decide.
+
+How the Runner is deployed (Redis, images, limits, timeouts) is not part of it; that is
+:class:`~orchestrator.settings.ServiceSettings`, read from the environment.
+"""
 
 from __future__ import annotations
 
-import json
-import os
-from pathlib import Path
 from typing import Any, Literal
 
-import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from archipelago_logging.genome import DEFAULT_PRECISION_DECIMALS, GenomeLogMode
-from archipelago_logging.version import HARNESS_VERSION, SCHEMA_VERSION
+from archipelago_logging.ids import check_run_id
+from archipelago_logging.version import HARNESS_VERSION
 
 __all__ = [
     "MigrationConfig",
-    "LiveStreamConfig",
     "LoggingConfig",
-    "ExecutionConfig",
-    "DockerConfig",
+    "TerminationConfig",
     "RunConfig",
-    "load_config",
-    "apply_overrides",
-    "ENV_PREFIX",
+    "RUN_CONFIG_ENV",
+    "ISLAND_CONFIG_ENV",
 ]
 
-ENV_PREFIX = "ARCHIPELAGO_"
+RUN_CONFIG_ENV = "RUN_CONFIG"
+"""Carries the run's config, as JSON, into the run's master container."""
+ISLAND_CONFIG_ENV = "ISLAND_CONFIG"
+"""Carries the run's config, as JSON, into each island container."""
 
 
 class _Base(BaseModel):
@@ -85,83 +86,18 @@ class MigrationConfig(_Base):
     )
 
 
-class LiveStreamConfig(_Base):
-    """Live TCP stream of a run's complete output from the master to an external consumer."""
-
-    enabled: bool = Field(
-        default=False,
-        description="Stream the run's complete output to host:port as it is produced -- every run.jsonl event, every evaluations.csv row, and the final summary. Opt-in: a run with no listener should not stall or fail.",
-    )
-    host: str = Field(
-        default="127.0.0.1",
-        description="Address of the receiving service. Under the docker backend the master runs in a container, so 127.0.0.1 is the container's own loopback -- use host.docker.internal or an explicit address to reach a listener on the host.",
-    )
-    port: int = Field(
-        default=9900, ge=1, le=65535, description="Port the receiving service listens on."
-    )
-    queue_size: int = Field(
-        default=100_000,
-        ge=1000,
-        description="Outbound queue depth. On overflow records are dropped and counted rather than back-pressuring the run: a slow consumer degrades the stream, never the search. The files on disk are unaffected either way.",
-    )
-    connect_timeout_seconds: float = Field(
-        default=10.0, gt=0.0, description="Timeout for the initial connection to the receiver."
-    )
-    max_reconnect_attempts: int = Field(
-        default=5,
-        ge=0,
-        description="Reconnect attempts before the stream gives up and marks itself degraded. The run continues regardless.",
-    )
-
-
 class LoggingConfig(_Base):
-    """What gets logged, how much of it, and where it goes."""
+    """How genomes are logged."""
 
-    output_dir: str = Field(default="runs", description="Parent directory; each run gets a subdirectory.")
-    run_subdir: str | None = Field(
-        default=None, description="Explicit subdirectory name. Defaults to the run id."
-    )
     genome_mode: GenomeLogMode = Field(
         default=GenomeLogMode.COMPACT,
-        description="hashed | compact | full. See archipelago_logging.genome. The genome hash is always written regardless of this setting.",
+        description="compact | full. See archipelago_logging.genome. The genome hash is always written regardless of this setting.",
     )
     genome_precision_decimals: int = Field(
         default=DEFAULT_PRECISION_DECIMALS,
         ge=0,
         le=15,
         description="Rounding used to form the location signature of real-valued genomes. Hashes from runs with different precision are not comparable.",
-    )
-    genome_sample_every: int = Field(
-        default=1,
-        ge=1,
-        description="Write the full genome body only every n-th evaluation; the rest carry the hash alone. Deterministic (counter-based), so a re-run reproduces exactly the same sampling decisions.",
-    )
-    log_evaluations: bool = Field(
-        default=True,
-        description="Write one CSV row.",
-    )
-    validate_events: bool = Field(
-        default=True,
-        description="Validate every event against its Pydantic model before writing. Costs a few microseconds per record; disable only for long sweeps whose configuration has already passed a validated smoke run.",
-    )
-    compress: bool = Field(default=False, description="gzip the JSON Lines shards.")
-    write_island_shards: bool = Field(
-        default=True,
-        description="Each island writes its own durable shard file. Strongly recommended: it is the copy that survives a master crash or a saturated network sink.",
-    )
-    stream_to_master: bool = Field(
-        default=True,
-        description="Islands also stream events to the master's collector, which writes the single aggregated run.jsonl. This is the path the later real-time streaming phase builds on.",
-    )
-    flush_interval_seconds: float = Field(default=2.0, ge=0.0)
-    network_queue_size: int = Field(
-        default=100_000,
-        ge=1000,
-        description="Per-island outbound log queue. On overflow, records are dropped and counted rather than back-pressuring the evolutionary loop.",
-    )
-    live_stream: LiveStreamConfig = Field(
-        default_factory=LiveStreamConfig,
-        description="Live TCP stream of the run's complete output to an external consumer.",
     )
 
 
@@ -187,87 +123,21 @@ class TerminationConfig(_Base):
         default=None,
         description="Stop an island once its best objective value passes this.",
     )
-    time_limit_seconds: float | None = Field(
-        default=None, gt=0.0, description="Wall-clock limit for the whole run."
-    )
-
-
-class ExecutionConfig(_Base):
-    """How islands are launched."""
-
-    backend: Literal["docker", "local"] = Field(
-        default="docker",
-        description="'docker' (the default) gives each island its own container, which is what the project's island model means by a node. 'local' runs each island as a subprocess on this host instead -- same code, same protocol, no container runtime needed, which is what makes the harness testable in CI.",
-    )
-    control_host: str = Field(
-        default="127.0.0.1", description="Address the master binds for control and log collection."
-    )
-    control_port: int = Field(
-        default=0, ge=0, le=65535, description="0 selects an ephemeral port, reported in the log."
-    )
-    advertise_host: str | None = Field(
-        default=None,
-        description="Address workers use to reach the master. Defaults to control_host for the local backend and to the Docker host gateway for the docker backend.",
-    )
-    connect_timeout_seconds: float = Field(
-        default=60.0,
-        gt=0.0,
-        description="How long a worker retries the master's control socket at startup before giving up and running standalone (no migration). Containers start slower than subprocesses, so this needs headroom under the docker backend.",
-    )
-    heartbeat_interval_seconds: float = Field(
-        default=2.0,
-        gt=0.0,
-        description="How often an island reports its progress to the master. Carries the archipelago-wide evaluation total, and brings back the master's 'wind down' flag; it is not a liveness probe.",
-    )
-    shutdown_grace_seconds: float = Field(
-        default=20.0,
-        gt=0.0,
-        description="How long a worker gets to finish its generation and flush its logs after being asked to stop, before it is killed.",
-    )
-    worker_python: str | None = Field(
-        default=None, description="Interpreter for local-backend workers. Defaults to sys.executable."
-    )
-
-
-class DockerConfig(_Base):
-    """Worker container image and resource limits."""
-
-    image: str = Field(default="archipelago-worker:latest")
-    build: bool = Field(
-        default=True, description="Build the image from `dockerfile` if it is missing or out of date."
-    )
-    dockerfile: str = Field(default="docker/Dockerfile.worker")
-    build_context: str = Field(default=".")
-    build_network: str | None = Field(
-        default=None,
-        description="Network mode for the image build. Leave unset for the daemon default.",
-    )
-    cpus: float = Field(default=1.0, gt=0.0, description="CPU quota.")
-    memory: str = Field(default="2g", description="Memory limit per worker container, e.g. '2g'.")
-    network: str | None = Field(
-        default=None,
-        description="Attach the islands to this existing Docker network. Leave unset (the default) to create a private bridge network per run and remove it afterwards. The per-run network is what lets a containerised master and its islands reach each other without routing through the host, so it is also unaffected by a host firewall that rejects traffic from the docker bridge.",
-    )
-    auto_remove: bool = Field(
-        default=True,
-        description="Remove containers on exit. Set false to keep a crashed worker's container around for `docker logs`.",
-    )
-    environment: dict[str, str] = Field(default_factory=dict)
-    labels: dict[str, str] = Field(
-        default_factory=lambda: {"app": "archipelago", "component": "island-worker"},
-        description="Applied to every worker container so an orphaned run can be found and cleaned up with a label filter.",
-    )
-    mount_output_dir: bool = Field(
-        default=True,
-        description="Bind-mount the run's output directory into each container so island shards land on the host filesystem directly.",
-    )
 
 
 class RunConfig(_Base):
     """The complete, validated description of one dEA run."""
 
-    run_id: str | None = Field(default=None, description="Auto-generated when absent.")
+    run_id: str = Field(
+        description="Minted by the Archipelago Backend and used verbatim everywhere. Must look like run-YYYYMMDDTHHMMSSZ-xxxxxxxx; container and network names are built from its last 8 hex digits.",
+    )
     description: str = Field(default="", description="Free-text note carried into run_start.")
+    seed: int | None = Field(
+        default=None,
+        ge=0,
+        le=4_294_967_295,
+        description="Makes the run repeatable: every random stream in it is derived from this one value, and nothing draws OS entropy. With migration off, two runs with the same seed produce identical evaluation records. With migration on they share every island's random stream but not its trajectory, because a migrant joins its destination on whatever generation that island has reached. Null draws fresh entropy.",
+    )
     algorithm: str = Field(default="de", description="Registry name: ga, de, pso, gp or es.")
     algorithm_params: dict[str, Any] = Field(default_factory=dict)
     benchmark: str = Field(default="rastrigin", description="Registry name; see benchmarks.registry.")
@@ -290,22 +160,22 @@ class RunConfig(_Base):
     )
     num_islands: int = Field(
         default=5,
-        ge=1,
-        le=64,
-        description="Islands, one worker each. The project scope fixes this at 4-6; see strict_island_range.",
-    )
-    strict_island_range: bool = Field(
-        default=True,
-        description="Enforce the project's 4-6 island range. Set false for smoke tests and unit tests, which legitimately want 1-2 islands.",
+        ge=4,
+        le=6,
+        description="Islands, one container each. The project scope fixes this at 4-6.",
     )
 
     termination: "TerminationConfig" = Field(default_factory=lambda: TerminationConfig())
 
     migration: MigrationConfig = Field(default_factory=MigrationConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
-    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
-    docker: DockerConfig = Field(default_factory=DockerConfig)
 
+
+    @field_validator("run_id")
+    @classmethod
+    def _run_id_shape(cls, run_id: str) -> str:
+        """The run id must have the shape `new_run_id` mints."""
+        return check_run_id(run_id)
 
     @model_validator(mode="after")
     def _validate(self) -> "RunConfig":
@@ -340,21 +210,6 @@ class RunConfig(_Base):
                     f"accepted: {sorted(accepted_benchmark)}"
                 )
 
-        if self.logging.live_stream.enabled and not (
-            self.logging.stream_to_master and self.logging.log_evaluations
-        ):
-            raise ValueError(
-                "logging.live_stream.enabled requires logging.stream_to_master and "
-                "logging.log_evaluations to both be true: the stream mirrors the master's "
-                "aggregated sinks, which are not built otherwise."
-            )
-
-        if self.strict_island_range and not (4 <= self.num_islands <= 6):
-            raise ValueError(
-                f"num_islands={self.num_islands} is outside the project's supported range of 4-6. "
-                "Set strict_island_range: false to override (intended for smoke and unit tests)."
-            )
-
         if self.migration.enabled:
             if self.migration.topology.lower() not in TOPOLOGIES:
                 raise ValueError(
@@ -371,9 +226,22 @@ class RunConfig(_Base):
                     f"unknown migrant replacement policy {self.migration.replacement!r}; "
                     f"available: {sorted(REPLACEMENT_POLICIES)}"
                 )
-            build_topology(
+            topology = build_topology(
                 self.migration.topology, self.num_islands, **self.migration.topology_params
             )
+            if self.migration.topology.lower() == "torus" and all(
+                len(neighbours) <= 2 for neighbours in topology.values()
+            ):
+                rows = self.migration.topology_params.get("rows")
+                grid = f"{self.num_islands} islands" + (
+                    f" in {rows} row{'s' if rows != 1 else ''}" if rows else ""
+                )
+                raise ValueError(
+                    f"a torus of {grid} gives every island only two neighbours, which makes it "
+                    "identical to bidirectional_ring, so the log would record a torus that "
+                    "never ran. A torus needs at least a 2x3 grid: num_islands: 6, in 2 or 3 "
+                    "rows. For 4 or 5 islands, use bidirectional_ring."
+                )
             resolved_population = self.resolved_population_size()
             if self.migration.num_migrants >= resolved_population:
                 raise ValueError(
@@ -433,7 +301,7 @@ class RunConfig(_Base):
         return max(1, (self.budget_per_island() - self.resolved_population_size()) // per_generation)
 
     def budget_plan(self) -> dict[str, Any]:
-        """How the evaluation budget resolves. Logged in ``run_start`` and shown by the CLI."""
+        """How the evaluation budget resolves. Logged in ``run_start``."""
         population = self.resolved_population_size()
         per_generation = self.evaluations_per_generation()
         generations = self.projected_generations()
@@ -457,199 +325,10 @@ class RunConfig(_Base):
             ),
         }
 
-    def output_path(self, run_id: str) -> Path:
-        """Directory this run's artefacts are written to."""
-        return Path(self.logging.output_dir) / (self.logging.run_subdir or run_id)
-
-    def genome_bytes_per_row(self) -> dict[str, Any]:
-        """Estimate the bytes one genome costs in a CSV row, for this exact run."""
-        from algorithms.registry import algorithm_class
-        from archipelago_logging.genome import GenomeEncoding
-        from benchmarks.base import Domain
-        from benchmarks.registry import benchmark_domain, create_problem
-
-        try:
-            problem = create_problem(self.benchmark, self.benchmark_params)
-            dimension = int(getattr(problem, "dimension", 30) or 30)
-            domain = problem.domain
-        except Exception:
-            dimension, domain = 30, benchmark_domain(self.benchmark)
-
-        if domain is Domain.BINARY:
-            encoding = GenomeEncoding.BITSTRING
-        elif domain is Domain.PERMUTATION:
-            encoding = GenomeEncoding.PERMUTATION
-        elif domain is Domain.SYMBOLIC_REGRESSION:
-            encoding = GenomeEncoding.EXPRESSION_TREE
-        else:
-            encoding = algorithm_class(self.algorithm).genome_encoding
-        def b64(raw_bytes: float) -> float:
-            """Size after base64, which expands binary by four thirds."""
-            return raw_bytes * 4.0 / 3.0 + 4
-
-        if encoding is GenomeEncoding.BITSTRING:
-            compact = b64(dimension / 8.0) + 6
-            full = dimension * 3.0
-        elif encoding is GenomeEncoding.PERMUTATION:
-            compact = b64(dimension * 4.0)
-            full = dimension * 4.5
-        elif encoding is GenomeEncoding.REAL_VECTOR:
-            compact = b64(dimension * 8.0)
-            full = dimension * 20.0
-        elif encoding in (GenomeEncoding.REAL_VECTOR_VELOCITY, GenomeEncoding.REAL_VECTOR_SIGMA):
-            compact = 2 * b64(dimension * 8.0) + 20
-            full = 2 * dimension * 20.0 + 20
-        else:
-            compact = full = 80.0
-
-        return {
-            "genome_encoding": encoding.value,
-            "genome_dimension": dimension,
-            "compact_bytes": int(compact),
-            "full_bytes": int(full),
-        }
-
-    def estimate_log_volume(self) -> dict[str, Any]:
-        """Project the dataset size before the run starts."""
-        expected_parents = {"de": 4, "ga": 2, "gp": 2, "pso": 2}.get(
-            self.algorithm.lower(), int(self.algorithm_params.get("rho", 2))
-        )
-        envelope_bytes = 150 + 23 * expected_parents
-        genome = self.genome_bytes_per_row()
-
-        if self.logging.genome_mode is GenomeLogMode.HASHED:
-            genome_bytes = 0.0
-        elif self.logging.genome_mode is GenomeLogMode.COMPACT:
-            genome_bytes = float(genome["compact_bytes"])
-        else:
-            genome_bytes = float(genome["full_bytes"])
-
-        effective_genome = genome_bytes / max(1, self.logging.genome_sample_every)
-        per_record = envelope_bytes + effective_genome
-
-        plan = self.budget_plan()
-        total_evaluations = plan["projected_total_evaluations"]
-        evaluation_bytes = int(total_evaluations * per_record) if self.logging.log_evaluations else 0
-
-        generations = plan["projected_generations_if_no_early_stop"]
-        generation_bytes = 460 * generations * self.num_islands
-        migration_bytes = 0
-        if self.migration.enabled and self.migration.interval:
-            events = (generations // self.migration.interval) * self.num_islands * 2
-            migration_bytes = int(events * 420)
-
-        total = evaluation_bytes + generation_bytes + migration_bytes
-        copies = (1 if self.logging.write_island_shards else 0) + (
-            1 if self.logging.stream_to_master else 0
-        )
-        return {
-            **plan,
-            **genome,
-            "bytes_per_evaluation_row": int(per_record),
-            "estimate_accuracy": "within roughly 15% of a real run; see tests/test_config.py",
-            "evaluations_csv_bytes": evaluation_bytes,
-            "run_jsonl_bytes": generation_bytes + migration_bytes,
-            "estimated_bytes_single_copy": total,
-            "estimated_bytes_on_disk": total * max(1, copies),
-            "estimated_megabytes_on_disk": round(total * max(1, copies) / 1e6, 2),
-            "copies_written": max(1, copies),
-        }
-
     def resolved(self) -> dict[str, Any]:
         """JSON-safe dict of the fully resolved config, for ``run_start.config``."""
         payload = self.model_dump(mode="json")
         payload["_meta"] = {
-            "schema_version": SCHEMA_VERSION,
             "harness_version": HARNESS_VERSION,
         }
         return payload
-
-    def write_resolved(self, path: Path) -> Path:
-        """Write ``resolved_config.yaml`` beside the logs."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(yaml.safe_dump(self.resolved(), sort_keys=False), encoding="utf-8")
-        return path
-
-
-def _coerce(text: str) -> Any:
-    """Parse an override value as JSON, falling back to the raw string."""
-    try:
-        return json.loads(text)
-    except (json.JSONDecodeError, TypeError):
-        return text
-
-
-def _set_path(target: dict[str, Any], dotted: str, value: Any) -> None:
-    parts = dotted.split(".")
-    cursor = target
-    for part in parts[:-1]:
-        existing = cursor.get(part)
-        if not isinstance(existing, dict):
-            existing = {}
-            cursor[part] = existing
-        cursor = existing
-    cursor[parts[-1]] = value
-
-
-def _env_overrides(environ: dict[str, str] | None = None) -> dict[str, Any]:
-    """Collect ``ARCHIPELAGO_*`` variables into a nested override dict."""
-    environ = os.environ if environ is None else environ
-    known = set(RunConfig.model_fields)
-    overrides: dict[str, Any] = {}
-    for key, raw in environ.items():
-        if not key.startswith(ENV_PREFIX):
-            continue
-        dotted = key[len(ENV_PREFIX) :].lower().replace("__", ".")
-        head = dotted.split(".", 1)[0]
-        if head not in known:
-            raise ValueError(
-                f"environment variable {key} does not name a run-config field "
-                f"({head!r} is not one of {sorted(known)}). The {ENV_PREFIX} prefix is "
-                "reserved for configuration overrides."
-            )
-        _set_path(overrides, dotted, _coerce(raw))
-    return overrides
-
-
-def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
-    for key, value in overlay.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _deep_merge(merged[key], value)
-        else:
-            merged[key] = value
-    return merged
-
-
-def apply_overrides(base: dict[str, Any], overrides: list[str] | None) -> dict[str, Any]:
-    """Apply ``key.path=value`` strings from ``--set`` flags."""
-    result = dict(base)
-    for item in overrides or []:
-        if "=" not in item:
-            raise ValueError(f"malformed override {item!r}; expected key.path=value")
-        dotted, _, raw = item.partition("=")
-        _set_path(result, dotted.strip(), _coerce(raw.strip()))
-    return result
-
-
-def load_config(
-    path: str | Path | None = None,
-    *,
-    overrides: list[str] | None = None,
-    environ: dict[str, str] | None = None,
-) -> RunConfig:
-    """Load, merge and validate a run configuration."""
-    document: dict[str, Any] = {}
-    if path is not None:
-        config_path = Path(path)
-        if not config_path.exists():
-            raise FileNotFoundError(f"config file not found: {config_path}")
-        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-        if not isinstance(loaded, dict):
-            raise ValueError(f"{config_path}: top level of a run config must be a mapping")
-        loaded.pop("_meta", None)
-        document = loaded
-
-    document = _deep_merge(document, _env_overrides(environ))
-    document = apply_overrides(document, overrides)
-    return RunConfig(**document)

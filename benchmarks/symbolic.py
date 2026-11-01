@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 from typing import Any, Callable
 
@@ -16,9 +15,7 @@ __all__ = [
     "SymbolicRegression",
     "SYMBOLIC_BENCHMARKS",
     "REAL_REGRESSION_DATASETS",
-    "make_symbolic_benchmark",
     "load_regression_table",
-    "load_regression_csv",
     "INVALID_FITNESS",
 ]
 
@@ -192,9 +189,6 @@ def load_regression_table(
     return x, y, variable_names
 
 
-load_regression_csv = load_regression_table
-
-
 REAL_REGRESSION_DATASETS: dict[str, dict[str, Any]] = {
     "yacht": {
         "path": "benchmarks/data/regression/yacht_hydrodynamics.data",
@@ -255,7 +249,7 @@ class SymbolicRegression(RegressionProblem):
             if not path.exists():
                 raise FileNotFoundError(
                     f"real regression dataset {key!r} is not present at {path}. "
-                    "Download it with: python scripts/fetch_datasets.py --only regression"
+                    "It is committed under benchmarks/data/; restore it from git."
                 )
             x, y, names = load_regression_table(
                 path, spec["target_column"], csv_max_rows
@@ -318,7 +312,6 @@ class SymbolicRegression(RegressionProblem):
 
     def evaluate_predictions(self, y_pred: np.ndarray) -> ProblemEvaluation:
         """Score a prediction vector directly, without going through a predictor."""
-        self._evaluations += 1
         predictions = np.asarray(y_pred, dtype=float)
         if predictions.shape != self.y.shape or not np.all(np.isfinite(predictions)):
             return ProblemEvaluation(
@@ -342,7 +335,6 @@ class SymbolicRegression(RegressionProblem):
                 if predictions.ndim == 0:
                     predictions = np.full(self.y.shape, float(predictions))
         except (ArithmeticError, ValueError, TypeError):
-            self._evaluations += 1
             return ProblemEvaluation(
                 fitness=INVALID_FITNESS, objective=INVALID_FITNESS, feasible=False, constraint_violation=1.0
             )
@@ -366,8 +358,3 @@ class SymbolicRegression(RegressionProblem):
     def describe(self) -> dict[str, Any]:
         """Instance facts recorded in island_start.benchmark_params."""
         return {**super().describe(), "formula": self.formula, "metric": self.metric}
-
-
-def make_symbolic_benchmark(name: str, **kwargs: Any) -> SymbolicRegression:
-    """Convenience factory used by the registry."""
-    return SymbolicRegression(benchmark=name, **kwargs)

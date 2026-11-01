@@ -1,0 +1,37 @@
+# Island image: one container per island, created by each run's master.
+#
+#   docker build --network=host -f docker/Dockerfile.island -t archipelago-island:latest .
+#
+# `docker compose up --build` builds it with the Runner image; the Runner never builds images
+# itself. The island gets the run's config in ISLAND_CONFIG and the Runner's settings in the rest
+# of its environment.
+
+FROM python:3.12-slim
+
+# Fail fast and log promptly: an island's stdout is a post-mortem artefact, and
+# buffered output would be lost when a container is killed.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/archipelago \
+    IN_ARCHIPELAGO_CONTAINER=1
+
+WORKDIR /archipelago
+
+COPY requirements-island.txt ./
+RUN pip install --no-cache-dir -r requirements-island.txt
+
+COPY archipelago_logging/ ./archipelago_logging/
+COPY algorithms/ ./algorithms/
+COPY benchmarks/ ./benchmarks/
+COPY orchestrator/ ./orchestrator/
+
+# Run as an unprivileged user: an island needs no file system access beyond its code.
+# Its config arrives in the ISLAND_CONFIG environment variable, its records go to
+# Redis, and its result goes back to the master over the control channel.
+RUN useradd --create-home --uid 1000 archipelago \
+    && chown -R archipelago:archipelago /archipelago
+USER archipelago
+
+# Overridden by the master with the island id, run id and control address. Present so `docker run archipelago-island:latest --help` is useful.
+ENTRYPOINT ["python", "-m", "orchestrator.island"]
+CMD ["--help"]

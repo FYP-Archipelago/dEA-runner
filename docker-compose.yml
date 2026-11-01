@@ -1,0 +1,90 @@
+# The local stack: Redis, the Runner service, and a dummy Worker Pool worker that prints every
+# record as it lands in Redis.
+#
+#   cp .env.example .env          # set REDIS_PASSWORD
+#   docker compose up -d --build
+#   docker compose logs -f dummy-worker
+#
+# Then start runs through the Runner's API, as the Archipelago Backend would; the dummy backend
+# mints a run id, starts the run, follows it to the end and checks its stream:
+#   python scripts/dummy_backend.py run docker_de_sphere
+#
+# The Runner starts one master container per run, and each master creates its islands, all as
+# sibling containers through the mounted Docker socket, connected to this stack's network, so
+# they reach Redis as `redis` too. Redis keeps everything in memory: stopping it (stop, restart,
+# down, or Ctrl+C on an attached `up`) deletes every stream.
+
+name: archipelago
+
+services:
+  redis:
+    image: redis:7-alpine
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env (see .env.example)}
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"
+    # Back with the Runner after a reboot, empty: it keeps nothing on disk.
+    restart: unless-stopped
+
+  # Build-only: makes `up --build` build the image the Runner's masters start islands from. It
+  # exits as soon as it starts.
+  island:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.island
+      network: host
+    image: archipelago-island:latest
+    entrypoint: ["true"]
+    restart: "no"
+
+  runner:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.runner
+      network: host
+    image: archipelago-runner:latest
+    depends_on:
+      redis:
+        condition: service_healthy
+      island:
+        condition: service_completed_successfully
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    ports:
+      - "127.0.0.1:${RUNNER_HOST_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  dummy-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dummy-worker
+      network: host
+    image: archipelago-dummy-worker:latest
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    restart: unless-stopped

@@ -1,18 +1,6 @@
-"""Version constants for the Archipelago standardized log format."""
+"""The Runner's version. The record format itself is not versioned."""
 
 from __future__ import annotations
 
-SCHEMA_VERSION = "2.0"
-
-HARNESS_VERSION = "0.3.0"
-
-SCHEMA_VERSION_INFO = tuple(int(part) for part in SCHEMA_VERSION.split("."))
-
-
-def is_compatible(version: str) -> bool:
-    """Return ``True`` if a log written at ``version`` is readable by this code."""
-    try:
-        major, _minor = (int(part) for part in version.split(".")[:2])
-    except (TypeError, ValueError):
-        return False
-    return major == SCHEMA_VERSION_INFO[0]
+HARNESS_VERSION = "0.5.0"
+"""The Runner's own version, recorded in ``run_start.harness_version``."""

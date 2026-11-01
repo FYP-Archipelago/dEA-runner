@@ -1,11 +1,5 @@
-# The quickest real Docker run: five islands, one container each, created
-# programmatically per run from these values. Use it to check that the container
-# path works before committing to one of the 100,000-evaluation configs.
-#
-#   python -m orchestrator.cli run --config config/docker_de_sphere.yaml
-#
-# The master builds the worker image itself. To build it by hand instead:
-#   docker build --network=host -f docker/Dockerfile.worker -t archipelago-worker:latest .
+# The quick demo: five islands, one container each, done in seconds. Use it to
+# check that the Runner works before starting one of the 100,000-evaluation presets.
 
 description: "DE on Sphere, 5 islands, one Docker container per island."
 
@@ -14,8 +8,8 @@ benchmark: sphere
 benchmark_params:
   dimension: 10
 
-# Deliberately smaller than the 100,000 the local configs use: container startup
-# dominates a short run, and this config exists to prove the backend works.
+# Deliberately smaller than the other presets' 100,000: container startup
+# dominates a short run, and this preset exists to prove the Runner works.
 evaluation_budget: 20000
 target_generations: 60
 num_islands: 5
@@ -33,35 +27,4 @@ migration:
   replacement: worst
 
 logging:
-  output_dir: runs
   genome_mode: compact
-  # Live TCP stream of the run's COMPLETE output to an external consumer:
-  # every run.jsonl event, every evaluations.csv row, and the final summary.
-  # Receive it with:
-  #   python scripts/stream_receiver.py --port 9900
-  # The stream comes from the master, not the islands. Running `cli run` from a
-  # shell keeps the master on the host even under this backend -- only the
-  # workers are containers -- so 127.0.0.1 is correct. Set host.docker.internal
-  # only when the master itself runs in a container (docker/Dockerfile.master).
-  # A missing listener degrades the stream only: the run and its files are fine.
-  live_stream:
-    enabled: false
-    host: 127.0.0.1
-    port: 9900
-
-execution:
-  backend: docker      # the default; each island gets its own container
-  # The master binds 0.0.0.0 automatically under this backend, and workers reach
-  # it at host.docker.internal (mapped to host-gateway on every container).
-  connect_timeout_seconds: 120.0   # containers start slower than subprocesses
-
-docker:
-  image: archipelago-worker:latest
-  build: true          # built automatically if missing or older than the sources
-  dockerfile: docker/Dockerfile.worker
-  cpus: 1.0
-  memory: 2g
-  auto_remove: true    # set false to keep a container around for `docker logs`
-  # Docker's builder VM may not inherit the host resolver, which shows up as pip
-  # being unable to reach PyPI. "host" fixes it and is harmless otherwise.
-  build_network: host
