@@ -5,7 +5,7 @@
 # permutation, which makes this the heaviest preset in Redis
 # (docs/MEMORY_MEASUREMENTS.md).
 
-description: "Permutation GA (OX + inversion), 5 islands, TSPLIB kroA100."
+description: "Permutation GA (OX + inversion) on TSPLIB kroA100 (100 cities)."
 
 algorithm: ga
 algorithm_params:

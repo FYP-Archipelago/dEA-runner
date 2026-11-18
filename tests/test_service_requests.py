@@ -48,7 +48,7 @@ def test_presets_lists_every_preset_with_its_defaults(client):
         "preset": "DE_Sphere",
         "algorithm": "de",
         "benchmark": "sphere",
-        "description": "DE on Sphere 10D, 5 islands, 20,000 evaluations.",
+        "description": "DE/rand/1/bin on Sphere 10D.",
         "defaults": {"num_islands": 5, "evaluation_budget": 20000, "target_generations": 60,
                      "migration.enabled": True, "migration.topology": "ring", "migration.interval": 5,
                      "migration.num_migrants": 3},

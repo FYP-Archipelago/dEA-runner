@@ -4,7 +4,7 @@
 # read from a data file: there is no generated substitute, so the problem is
 # identical in every run of this config.
 
-description: "DE/rand/1/bin, 5 islands, CEC-shifted Rastrigin 10D, ring migration."
+description: "DE/rand/1/bin on CEC-shifted Rastrigin 10D."
 
 algorithm: de
 algorithm_params:
