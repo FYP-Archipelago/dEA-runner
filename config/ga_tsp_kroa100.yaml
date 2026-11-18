@@ -1,12 +1,11 @@
-# The reference dataset-generation run: 100,000 evaluations across the whole
-# archipelago, on a real TSPLIB instance, ending when the islands stop improving.
+# Permutation GA on TSPLIB kroA100: the operators of ga_tsp_berlin52 on a
+# 100-city instance, with looser termination so the run spends its budget.
 #
-# This is the configuration to use when the goal is *the dataset* rather than a
-# particular experiment. Everything is sized from `evaluation_budget`, so the
-# run has a known number of evaluation records regardless of which algorithm or
-# problem is swapped in.
+# kroA100's optimal tour length is 21282. Each record carries a 100-city
+# permutation, which makes this the heaviest preset in Redis
+# (docs/MEMORY_MEASUREMENTS.md).
 
-description: "Reference dataset run: 100,000 evaluations, 5 islands, TSPLIB kroA100."
+description: "Permutation GA (OX + inversion), 5 islands, TSPLIB kroA100."
 
 algorithm: ga
 algorithm_params:

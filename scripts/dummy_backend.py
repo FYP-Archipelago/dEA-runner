@@ -2,8 +2,8 @@
 """Stand in for the Archipelago Backend: start runs through the Runner's API and follow them.
 
     python scripts/dummy_backend.py presets
-    python scripts/dummy_backend.py run docker_de_sphere
-    python scripts/dummy_backend.py run full_dataset --set evaluation_budget=250000 --set seed=7
+    python scripts/dummy_backend.py run de_sphere
+    python scripts/dummy_backend.py run ga_tsp_kroa100 --set evaluation_budget=250000 --set seed=7
     python scripts/dummy_backend.py status <run id>
     python scripts/dummy_backend.py cancel <run id>
 

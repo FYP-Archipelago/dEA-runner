@@ -18,7 +18,7 @@ SHA-256 of each recorded in `MANIFEST.json`.
 
 | Group | Files | Used by |
 | --- | --- | --- |
-| `tsp/` | TSPLIB eil51, berlin52, att48, kroA100 — with published optima | `ga_tsp.yaml`, `full_dataset.yaml` |
+| `tsp/` | TSPLIB eil51, berlin52, att48, kroA100 — with published optima | `ga_tsp_berlin52.yaml`, `ga_tsp_kroa100.yaml` |
 | `knapsack/` | Pisinger uncorrelated / weakly / strongly / inverse-strongly correlated, n=100 and 200 | `ga_knapsack.yaml` |
 | `regression/` | UCI Yacht (308×6), UCI Airfoil (1503×5) | `gp_yacht.yaml` |
 | `cec/` | CEC2017 shift vectors | `de_rastrigin.yaml` |

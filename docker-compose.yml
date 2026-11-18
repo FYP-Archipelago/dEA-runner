@@ -7,7 +7,7 @@
 #
 # Then start runs through the Runner's API, as the Archipelago Backend would; the dummy backend
 # mints a run id, starts the run, follows it to the end and checks its stream:
-#   python scripts/dummy_backend.py run docker_de_sphere
+#   python scripts/dummy_backend.py run de_sphere
 #
 # The Runner starts one master container per run, and each master creates its islands, all as
 # sibling containers through the mounted Docker socket, connected to this stack's network, so

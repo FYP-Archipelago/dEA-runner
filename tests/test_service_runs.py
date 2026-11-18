@@ -25,7 +25,7 @@ from conftest import Broker, settings_for
 pytestmark = [pytest.mark.slow, pytest.mark.docker, pytest.mark.usefixtures("runner_image")]
 
 SHORT = {"evaluation_budget": 2000}
-LONG = ("full_dataset", {"evaluation_budget": 250_000})
+LONG = ("ga_tsp_kroa100", {"evaluation_budget": 250_000})
 """A run that cannot end on its own within any of these tests: it takes minutes."""
 
 
@@ -35,7 +35,7 @@ def _service(broker: Broker, **settings):
         yield client
 
 
-def _post(client: TestClient, preset: str = "docker_de_sphere", overrides=None, run_id=None):
+def _post(client: TestClient, preset: str = "de_sphere", overrides=None, run_id=None):
     run_id = run_id or new_run_id()
     response = client.post(
         "/runs", json={"run_id": run_id, "preset": preset, "overrides": dict(overrides or {})}
@@ -211,7 +211,7 @@ def test_a_restarted_service_keeps_running_runs_and_loses_queued_ones(run_broker
         assert _post(second, *LONG, run_id=running)[1:] == (
             202, {"run_id": running, "state": "running", "error": None},
         )
-        assert _post(second, "full_dataset", run_id=running)[1] == 409
+        assert _post(second, "ga_tsp_kroa100", run_id=running)[1] == 409
         assert second.post(f"/runs/{running}/cancel").status_code == 202
         assert _wait_for(second, running, "cancelled", "failed", "finished")["state"] == "cancelled"
 
@@ -313,7 +313,7 @@ def test_the_dummy_backend_drives_a_real_server(run_broker, repository_root):
         with contextlib.redirect_stdout(out):
             code = dummy_backend.main([
                 "--runner-url", f"http://127.0.0.1:{port}", "--redis-url", run_broker.url,
-                "run", "docker_de_sphere", "--set", "evaluation_budget=2000", "--set", "seed=7",
+                "run", "de_sphere", "--set", "evaluation_budget=2000", "--set", "seed=7",
             ])
         printed = out.getvalue()
         assert code == 0, printed

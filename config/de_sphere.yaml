@@ -1,7 +1,7 @@
 # The quick demo: five islands, one container each, done in seconds. Use it to
 # check that the Runner works before starting one of the 100,000-evaluation presets.
 
-description: "DE on Sphere, 5 islands, one Docker container per island."
+description: "DE on Sphere 10D, 5 islands, 20,000 evaluations."
 
 algorithm: de
 benchmark: sphere
