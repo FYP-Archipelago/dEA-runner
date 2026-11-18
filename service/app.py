@@ -51,7 +51,7 @@ class RunRequest(BaseModel):
             "examples": [
                 {
                     "run_id": _EXAMPLE_RUN_ID,
-                    "preset": "de_sphere",
+                    "preset": "DE_Sphere",
                     "overrides": {"evaluation_budget": 5000, "seed": 42},
                 }
             ]
@@ -100,7 +100,7 @@ class ErrorBody(BaseModel):
 class PresetView(BaseModel):
     """One preset, with its value for every override key."""
 
-    preset: str = Field(description="The name to send as `preset` in POST /runs.", examples=["de_sphere"])
+    preset: str = Field(description="The name to send as `preset` in POST /runs.", examples=["DE_Sphere"])
     algorithm: str = Field(description="ga, de, pso, gp or es.", examples=["de"])
     benchmark: str = Field(description="The problem it solves.", examples=["sphere"])
     description: str = Field(description="What the preset runs, in a sentence.")

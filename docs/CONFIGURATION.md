@@ -31,7 +31,7 @@ these overrides, exactly as `GET /presets` publishes them:
 | `seed` | int, optional | 0 – 4,294,967,295; no default (fresh randomness each run) |
 
 ```json
-{"run_id": "run-20261031T120000Z-1a2b3c4d", "preset": "ga_tsp_berlin52",
+{"run_id": "run-20261031T120000Z-1a2b3c4d", "preset": "GA_TSP_Berlin52",
  "overrides": {"evaluation_budget": 50000, "migration.topology": "star", "seed": 42}}
 ```
 
@@ -48,15 +48,15 @@ these overrides, exactly as `GET /presets` publishes them:
 
 | Preset | What it runs |
 | --- | --- |
-| `de_rastrigin` | DE/rand/1/bin on CEC-shifted Rastrigin 10D (official shift data, no rotation) |
-| `pso_ackley` | PSO with constriction, ring swarm, `fanout: one_random`, Ackley 10D |
-| `es_schwefel` | Self-adaptive (μ,λ)-ES, star topology, `diverse` → `similar`, Schwefel 10D |
-| `ga_knapsack` | Binary GA on a real strongly correlated 0/1 knapsack (n = 100) |
-| `ga_tsp_berlin52` | Permutation GA (OX + inversion) on TSPLIB berlin52, its optimum as the target |
-| `ga_tsp_kroa100` | GA on TSPLIB kroA100, 100,000 evaluations |
-| `gp_nguyen7` | Koza GP on Nguyen-7, `genome_mode: full` |
-| `gp_yacht` | Koza GP on the UCI Yacht data: no exact solution, so stagnation ends it |
-| `de_sphere` | DE on Sphere, 20,000 evaluations: the quick demo |
+| `DE_Rastrigin` | DE/rand/1/bin on CEC-shifted Rastrigin 10D (official shift data, no rotation) |
+| `PSO_Ackley` | PSO with constriction, ring swarm, `fanout: one_random`, Ackley 10D |
+| `ES_Schwefel` | Self-adaptive (μ,λ)-ES, star topology, `diverse` → `similar`, Schwefel 10D |
+| `GA_Knapsack` | Binary GA on a real strongly correlated 0/1 knapsack (n = 100) |
+| `GA_TSP_Berlin52` | Permutation GA (OX + inversion) on TSPLIB berlin52, its optimum as the target |
+| `GA_TSP_KroA100` | GA on TSPLIB kroA100, 100,000 evaluations |
+| `GP_Nguyen7` | Koza GP on Nguyen-7, `genome_mode: full` |
+| `GP_Yacht` | Koza GP on the UCI Yacht data: no exact solution, so stagnation ends it |
+| `DE_Sphere` | DE on Sphere, 20,000 evaluations: the quick demo |
 
 ---
 
@@ -165,7 +165,7 @@ Every record is validated against its model before it is written; there is no sw
 only guard before the backend, and under Pydantic 2 the faster path (≈5 µs against ≈15 µs). A
 rejected record stops the island and consumes no `seq` or `eval_index`.
 
-Volume is linear in `evaluation_budget`: `ga_tsp_kroa100` appends ~100,000 records, 110 MB of record
+Volume is linear in `evaluation_budget`: `GA_TSP_KroA100` appends ~100,000 records, 110 MB of record
 data, 130 MB in Redis ([`MEMORY_MEASUREMENTS.md`](MEMORY_MEASUREMENTS.md)).
 
 ---

@@ -17,8 +17,8 @@ from service import create_app
 from service.presets import OVERRIDES, canonical_request, load_presets
 
 RUN_ID = "run-20261031T120000Z-1a2b3c4d"
-PRESETS = ["de_rastrigin", "de_sphere", "es_schwefel", "ga_knapsack", "ga_tsp_berlin52",
-           "ga_tsp_kroa100", "gp_nguyen7", "gp_yacht", "pso_ackley"]
+PRESETS = ["DE_Rastrigin", "DE_Sphere", "ES_Schwefel", "GA_Knapsack", "GA_TSP_Berlin52",
+           "GA_TSP_KroA100", "GP_Nguyen7", "GP_Yacht", "PSO_Ackley"]
 
 
 def _closed_port() -> int:
@@ -34,7 +34,7 @@ def client() -> TestClient:
 
 def _post(client: TestClient, overrides: dict | None = None, **body) -> tuple[int, dict]:
     response = client.post(
-        "/runs", json={"run_id": RUN_ID, "preset": "de_sphere", "overrides": overrides or {}, **body}
+        "/runs", json={"run_id": RUN_ID, "preset": "DE_Sphere", "overrides": overrides or {}, **body}
     )
     return response.status_code, response.json()
 
@@ -43,9 +43,9 @@ def test_presets_lists_every_preset_with_its_defaults(client):
     body = client.get("/presets").json()
     assert body["overrides"] == OVERRIDES
     assert [preset["preset"] for preset in body["presets"]] == PRESETS
-    sphere = next(p for p in body["presets"] if p["preset"] == "de_sphere")
+    sphere = next(p for p in body["presets"] if p["preset"] == "DE_Sphere")
     assert sphere == {
-        "preset": "de_sphere",
+        "preset": "DE_Sphere",
         "algorithm": "de",
         "benchmark": "sphere",
         "description": "DE on Sphere 10D, 5 islands, 20,000 evaluations.",
@@ -81,10 +81,10 @@ def test_every_default_is_within_the_published_bounds():
     [
         ("{not json", "the request body is not valid JSON"),
         ("[1, 2]", "the request body must be a JSON object with run_id, preset and overrides"),
-        ('{"preset": "de_sphere"}', "run_id: Field required"),
-        ('{"run_id": "my-run", "preset": "de_sphere"}', "must look like run-YYYYMMDDTHHMMSSZ"),
-        (f'{{"run_id": "{RUN_ID}", "preset": "de_sphere", "extra": 1}}', "extra: Extra inputs"),
-        (f'{{"run_id": "{RUN_ID}", "preset": "ga_tps"}}', "unknown preset 'ga_tps'; known presets: de_rastrigin"),
+        ('{"preset": "DE_Sphere"}', "run_id: Field required"),
+        ('{"run_id": "my-run", "preset": "DE_Sphere"}', "must look like run-YYYYMMDDTHHMMSSZ"),
+        (f'{{"run_id": "{RUN_ID}", "preset": "DE_Sphere", "extra": 1}}', "extra: Extra inputs"),
+        (f'{{"run_id": "{RUN_ID}", "preset": "ga_tps"}}', "unknown preset 'ga_tps'; known presets: DE_Rastrigin"),
     ],
 )
 def test_a_malformed_request_is_refused_with_the_reason(client, body, message):
@@ -171,22 +171,22 @@ def test_a_status_or_cancel_without_redis_is_a_503_not_a_404(client):
 
 
 def test_repeats_are_compared_as_sent_with_key_order_ignored():
-    first = canonical_request("ga_tsp_berlin52", {"seed": 7, "evaluation_budget": 5000})
-    assert first == canonical_request("ga_tsp_berlin52", {"evaluation_budget": 5000, "seed": 7})
-    assert first != canonical_request("ga_tsp_berlin52", {"evaluation_budget": 5000})
-    assert first != canonical_request("ga_knapsack", {"seed": 7, "evaluation_budget": 5000})
+    first = canonical_request("GA_TSP_Berlin52", {"seed": 7, "evaluation_budget": 5000})
+    assert first == canonical_request("GA_TSP_Berlin52", {"evaluation_budget": 5000, "seed": 7})
+    assert first != canonical_request("GA_TSP_Berlin52", {"evaluation_budget": 5000})
+    assert first != canonical_request("GA_Knapsack", {"seed": 7, "evaluation_budget": 5000})
 
 
 def test_overriding_the_topology_drops_the_presets_topology_parameters():
-    """es_schwefel's star has a hub; a ring overriding it has no such parameter."""
-    preset = load_presets()["es_schwefel"]
+    """ES_Schwefel's star has a hub; a ring overriding it has no such parameter."""
+    preset = load_presets()["ES_Schwefel"]
     assert preset.build(RUN_ID, {}).migration.topology_params == {"hub": 0}
     assert preset.build(RUN_ID, {"migration.topology": "ring"}).migration.topology_params == {}
     assert preset.build(RUN_ID, {"migration.topology": "star"}).migration.topology_params == {"hub": 0}
 
 
 def test_an_override_reaches_the_runs_config():
-    config = load_presets()["ga_tsp_berlin52"].build(
+    config = load_presets()["GA_TSP_Berlin52"].build(
         RUN_ID, {"evaluation_budget": 50_000, "migration.topology": "star", "seed": 42, "num_islands": 6}
     )
     assert (config.run_id, config.evaluation_budget, config.migration.topology, config.seed) == (
@@ -242,7 +242,7 @@ def test_the_request_example_in_the_docs_is_a_valid_request():
 
 def test_migration_can_be_switched_off_for_baseline_and_exactly_repeatable_runs():
     """With migration off a seeded run repeats record for record (LOGGING_FORMAT §12)."""
-    preset = load_presets()["de_sphere"]
+    preset = load_presets()["DE_Sphere"]
     config = preset.build(RUN_ID, {"migration.enabled": False, "seed": 7})
     assert (config.migration.enabled, config.seed) == (False, 7)
     assert preset.build(RUN_ID, {}).migration.enabled is True

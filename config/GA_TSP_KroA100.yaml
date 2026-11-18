@@ -1,4 +1,4 @@
-# Permutation GA on TSPLIB kroA100: the operators of ga_tsp_berlin52 on a
+# Permutation GA on TSPLIB kroA100: the operators of GA_TSP_Berlin52 on a
 # 100-city instance, with looser termination so the run spends its budget.
 #
 # kroA100's optimal tour length is 21282. Each record carries a 100-city

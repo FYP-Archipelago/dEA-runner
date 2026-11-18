@@ -11,11 +11,11 @@ The runs are started either by hand, in another terminal, or by the script itsel
 ``--start`` command is launched once the baseline is taken, all of them at the same time.
 
     python scripts/measure_memory.py --runs 1 \\
-        --start "python scripts/dummy_backend.py run ga_tsp_kroa100"
+        --start "python scripts/dummy_backend.py run GA_TSP_KroA100"
 
     python scripts/measure_memory.py --runs 2 --json two.json \\
-        --start "python scripts/dummy_backend.py run ga_tsp_berlin52" \\
-        --start "python scripts/dummy_backend.py run gp_yacht"
+        --start "python scripts/dummy_backend.py run GA_TSP_Berlin52" \\
+        --start "python scripts/dummy_backend.py run GP_Yacht"
 
 Redis is found from ``--redis-url``, else ``$REDIS_URL``, else the compose stack's ``.env``
 (``REDIS_PASSWORD``, ``REDIS_HOST_PORT``), so the password need not go on a command line. Uses
