@@ -5,7 +5,7 @@
 # checkable against the literature. Swap in eil51 (optimum 426), att48 (10628)
 # or kroA100 (21282).
 
-description: "Permutation GA (OX + inversion), 5 islands, TSPLIB berlin52."
+description: "Permutation GA (OX + inversion) on TSPLIB berlin52 (52 cities)."
 
 algorithm: ga
 algorithm_params:

@@ -21,15 +21,15 @@ entry; *overhead* is `MEMORY USAGE` ÷ record bytes.
 
 | Preset | Genomes | Evaluations | Record bytes | `MEMORY USAGE` | Overhead | Bytes / evaluation | At 500,000 |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `docker_de_sphere` | compact | 19,950 | 15.4 MB | 17.8 MB | ×1.16 | 893 | 446 MB |
-| `de_rastrigin` | compact | 91,105 | 69.6 MB | 80.6 MB | ×1.16 | 885 | 442 MB |
-| `es_schwefel` | compact | 96,107 | 81.9 MB | 94.3 MB | ×1.15 | 981 | 490 MB |
-| `full_dataset` (TSP kroA100) | compact | 99,760 | 110.1 MB | 130.0 MB | ×1.18 | 1,303 | 651 MB |
-| `ga_knapsack` | compact | 85,026 | 54.5 MB | 63.0 MB | ×1.16 | 741 | 370 MB |
-| `ga_tsp` (berlin52) | compact | 97,086 | 82.5 MB | 95.3 MB | ×1.16 | 982 | 491 MB |
-| `gp_nguyen7` | full | 99,220 | 65.8 MB | 76.4 MB | ×1.16 | 770 | 385 MB |
-| `gp_yacht` | full | 99,420 | 86.2 MB | 100.6 MB | ×1.17 | 1,012 | 506 MB |
-| `pso_ackley` | compact | 99,602 | 85.1 MB | 97.9 MB | ×1.15 | 983 | 492 MB |
+| `DE_Sphere` | compact | 19,950 | 15.4 MB | 17.8 MB | ×1.16 | 893 | 446 MB |
+| `DE_Rastrigin` | compact | 91,105 | 69.6 MB | 80.6 MB | ×1.16 | 885 | 442 MB |
+| `ES_Schwefel` | compact | 96,107 | 81.9 MB | 94.3 MB | ×1.15 | 981 | 490 MB |
+| `GA_Knapsack` | compact | 85,026 | 54.5 MB | 63.0 MB | ×1.16 | 741 | 370 MB |
+| `GA_TSP_Berlin52` | compact | 97,086 | 82.5 MB | 95.3 MB | ×1.16 | 982 | 491 MB |
+| `GA_TSP_KroA100` | compact | 99,760 | 110.1 MB | 130.0 MB | ×1.18 | 1,303 | 651 MB |
+| `GP_Nguyen7` | full | 99,220 | 65.8 MB | 76.4 MB | ×1.16 | 770 | 385 MB |
+| `GP_Yacht` | full | 99,420 | 86.2 MB | 100.6 MB | ×1.17 | 1,012 | 506 MB |
+| `PSO_Ackley` | compact | 99,602 | 85.1 MB | 97.9 MB | ×1.15 | 983 | 492 MB |
 
 "Bytes / evaluation" includes the run's other records; "At 500,000" multiplies it out.
 `MEMORY USAGE` overstates the real cost by about 7% (the nine streams summed to 755.9 MB while
@@ -39,11 +39,11 @@ entry; *overhead* is `MEMORY USAGE` ÷ record bytes.
 
 | Scenario | Evaluations | `MEMORY USAGE` | `used_memory` peak |
 | --- | ---: | ---: | ---: |
-| `full_dataset`, 500,000 | 499,270 | 643.4 MB (1,289 B / evaluation) | 603 MB |
-| Two `full_dataset` at 500,000, concurrently | 2 × ~499,270 | 2 × 643.4 MB | 1,207.5 MB |
+| `GA_TSP_KroA100`, 500,000 | 499,270 | 643.4 MB (1,289 B / evaluation) | 603 MB |
+| Two `GA_TSP_KroA100` at 500,000, concurrently | 2 × ~499,270 | 2 × 643.4 MB | 1,207.5 MB |
 
 * **Linear in evaluations**, at 0.74–1.3 KB each depending on the preset; Redis adds 15–18 % to
-  the record bytes. `full_dataset` (a 100-city permutation per record) is the heaviest.
+  the record bytes. `GA_TSP_KroA100` (a 100-city permutation per record) is the heaviest.
 * **Concurrency costs nothing extra** in the streams themselves: two runs are the sum of the two.
 * **Streams stay until the backend expires them.** Under `noeviction` a full Redis fails the next
   `XADD`, and the run fails rather than lose records.
@@ -52,7 +52,7 @@ Not covered: overrides that grow records (more generations give GP trees more ti
 Valkey (it behaves identically in the tests; its memory was not measured).
 
 **Repeating it:** with the compose stack up, `python scripts/measure_memory.py --runs 1 --json
-cap.json --start "python scripts/dummy_backend.py run full_dataset --set evaluation_budget=500000"`.
+cap.json --start "python scripts/dummy_backend.py run GA_TSP_KroA100 --set evaluation_budget=500000"`.
 `--start` may be repeated (concurrent runs) and may hold a loop over presets;
 `docker compose restart redis dummy-worker` empties Redis between scenarios.
 
@@ -64,7 +64,7 @@ cap.json --start "python scripts/dummy_backend.py run full_dataset --set evaluat
 own `compose.yaml`: API, two Worker Pool workers, PostgreSQL 16, Redis 7.4 with `--maxmemory 2gb`,
 `noeviction` and `appendonly yes`. The Runner from `docker-compose.prod.yml` on the backend's
 network. Every run was started with the backend's `POST /runs`, clustering `{"birch": true}`,
-on `full_dataset`, the heaviest preset.
+on `GA_TSP_KroA100`, the heaviest preset.
 
 **Method.** Every container's memory as `docker stats` reports it (cgroup v2 `memory.current` less
 `inactive_file`), sampled every 0.5 s. Each figure is the peak of that component's total across

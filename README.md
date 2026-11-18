@@ -24,8 +24,8 @@ dummy backend mints a run id, starts the run, follows it to the end and checks i
 
 ```bash
 python scripts/dummy_backend.py presets
-python scripts/dummy_backend.py run docker_de_sphere
-python scripts/dummy_backend.py run full_dataset --set evaluation_budget=250000 --set seed=7
+python scripts/dummy_backend.py run DE_Sphere
+python scripts/dummy_backend.py run GA_TSP_KroA100 --set evaluation_budget=250000 --set seed=7
 python scripts/dummy_backend.py cancel <run id>
 docker compose down                   # removes Redis, and every stream with it
 ```

@@ -94,7 +94,7 @@ benchmark_params:
 Selected by name like any other benchmark. Both are standard symbolic-regression
 sets and both are small enough that a tree evaluation over the whole dataset
 stays cheap — which matters, because GP evaluates every row for every individual.
-Yacht is the cheaper of the two and is what `config/gp_yacht.yaml` uses.
+Yacht is the cheaper of the two and is what `config/GP_Yacht.yaml` uses.
 
 Columns are named (`froude_number`, `angle_of_attack`, …) rather than `x0..xn`,
 so an evolved expression is readable.

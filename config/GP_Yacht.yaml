@@ -6,7 +6,7 @@
 # plateaus at a non-zero error and the stagnation rule (rather than a target
 # fitness) is what ends the run.
 
-description: "Tree GP, 5 islands, UCI Yacht Hydrodynamics regression."
+description: "Tree GP (Koza operators) on UCI Yacht Hydrodynamics regression."
 
 algorithm: gp
 algorithm_params:

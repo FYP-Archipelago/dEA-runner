@@ -3,7 +3,7 @@
 # and the archipelago's bidirectional ring -- which is a useful case for the
 # visualisation phase to be able to tell apart.
 
-description: "PSO (constriction, ring swarm topology), 5 islands, Ackley 10D."
+description: "Constriction PSO on Ackley 10D."
 
 algorithm: pso
 algorithm_params:

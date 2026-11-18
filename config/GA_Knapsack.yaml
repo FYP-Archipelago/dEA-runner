@@ -2,7 +2,7 @@
 # the Knapsack Problem Library -- Pisinger's hard family, where value density
 # carries almost no information.
 
-description: "Binary GA, 5 islands, strongly correlated 0/1 knapsack (n=100, real instance)."
+description: "Binary GA on a strongly correlated 0/1 knapsack (n=100)."
 
 algorithm: ga
 algorithm_params:

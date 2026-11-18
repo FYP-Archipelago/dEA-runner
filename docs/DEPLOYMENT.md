@@ -46,7 +46,7 @@ And run one quick job end to end. The dummy backend needs this repository's Pyth
 (`pip install -e .`); it starts the run, follows it, and checks its stream in Redis:
 
 ```bash
-python scripts/dummy_backend.py --runner-url http://<RUNNER_BIND>:<RUNNER_PORT> --redis-url "<REDIS_URL>" run docker_de_sphere --set evaluation_budget=5000
+python scripts/dummy_backend.py --runner-url http://<RUNNER_BIND>:<RUNNER_PORT> --redis-url "<REDIS_URL>" run DE_Sphere --set evaluation_budget=5000
 ```
 
 It prints `finished` and `stream valid: …` and exits 0. Its stream stays in Redis until deleted;
