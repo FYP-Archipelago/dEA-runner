@@ -50,6 +50,7 @@ def test_presets_lists_every_preset_with_its_defaults(client):
         "benchmark": "sphere",
         "description": "DE on Sphere, 5 islands, one Docker container per island.",
         "defaults": {"num_islands": 5, "evaluation_budget": 20000, "target_generations": 60,
+                     "termination.stagnation_generations": 20,
                      "migration.enabled": True, "migration.topology": "ring", "migration.interval": 5,
                      "migration.num_migrants": 3},
     }
@@ -59,6 +60,7 @@ def test_the_published_bounds_are_the_agreed_ones():
     assert OVERRIDES["num_islands"] == {"type": "int", "min": 4, "max": 6}
     assert OVERRIDES["evaluation_budget"] == {"type": "int", "min": 1000, "max": 250_000}
     assert OVERRIDES["target_generations"] == {"type": "int", "min": 2}
+    assert OVERRIDES["termination.stagnation_generations"] == {"type": "int", "min": 0}
     assert OVERRIDES["migration.enabled"] == {"type": "bool"}
     assert OVERRIDES["migration.topology"] == {"type": "choice", "choices": sorted(TOPOLOGIES)}
     assert OVERRIDES["seed"] == {"type": "int", "min": 0, "max": 4_294_967_295, "optional": True}
@@ -104,6 +106,11 @@ def test_a_malformed_request_is_refused_with_the_reason(client, body, message):
         ({"num_islands": 7}, "'num_islands' must be at most 6, not 7"),
         ({"num_islands": 3}, "'num_islands' must be at least 4, not 3"),
         ({"target_generations": 1}, "'target_generations' must be at least 2, not 1"),
+        ({"termination.stagnation_generations": -1}, "'termination.stagnation_generations' must be at least 0"),
+        ({"termination.stagnation_generations": "40"}, "'termination.stagnation_generations' must be an integer"),
+        ({"termination.stagnation_generations": 2.5}, "'termination.stagnation_generations' must be an integer"),
+        ({"termination.stagnation_generations": True}, "'termination.stagnation_generations' must be an integer"),
+        ({"termination.stagnation_generations": None}, "'termination.stagnation_generations' must be an integer"),
         ({"seed": -1}, "'seed' must be at least 0, not -1"),
         ({"seed": 4_294_967_296}, "'seed' must be at most 4,294,967,295"),
         ({"migration.topology": "mesh"}, "'migration.topology' must be one of"),
@@ -137,6 +144,42 @@ def test_a_combination_that_cannot_run_is_refused(client, overrides, message):
 def test_a_torus_with_six_islands_passes_validation(client):
     status, body = _post(client, {"migration.topology": "torus", "num_islands": 6})
     assert status == 503, body  # valid: it gets as far as Redis, which is unreachable here
+
+
+def test_presets_expose_their_individual_stagnation_limits(client):
+    presets = client.get("/presets").json()["presets"]
+    assert {p["preset"]: p["defaults"]["termination.stagnation_generations"] for p in presets} == {
+        "de_rastrigin": 40,
+        "docker_de_sphere": 20,
+        "es_schwefel": 40,
+        "full_dataset": 100,
+        "ga_knapsack": 50,
+        "ga_tsp": 60,
+        "gp_nguyen7": 30,
+        "gp_yacht": 25,
+        "pso_ackley": 40,
+    }
+
+
+@pytest.mark.parametrize("limit", [None, 0, 1, 75])
+def test_stagnation_override_reaches_the_submitted_config(client, monkeypatch, limit):
+    submitted = []
+
+    def submit(run_id, request, config):
+        submitted.append(config)
+        return {"run_id": run_id, "state": "queued", "error": None}
+
+    monkeypatch.setattr(client.app.state.queue, "submit", submit)
+    overrides = {} if limit is None else {"termination.stagnation_generations": limit}
+    status, body = _post(client, overrides)
+    assert status == 202, body
+    assert len(submitted) == 1
+    config = submitted[0]
+    assert config.termination.stagnation_generations == (20 if limit is None else limit)
+    preset_config = load_presets()["docker_de_sphere"].build(RUN_ID, {})
+    assert preset_config.termination.stagnation_generations == 20
+    assert config.termination.max_generations == preset_config.termination.max_generations
+    assert config.termination.target_fitness == preset_config.termination.target_fitness
 
 
 def test_a_valid_request_without_redis_is_refused_and_safe_to_retry(client):

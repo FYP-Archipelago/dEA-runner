@@ -46,6 +46,13 @@ matter), which with a `seed` repeats record for record. Checked in order: the bo
 below the per-island population, `interval` ≤ `target_generations`, a torus only with 6 islands),
 then the container limit. Each failure is a 422 naming the problem and its numbers.
 
+**Stagnation rounds.** Each preset exposes its limit in
+`defaults["termination.stagnation_generations"]`. To choose a different number of consecutive
+generations without improvement before an island stops, submit
+`"overrides": {"termination.stagnation_generations": 40}`. The value must be a non-negative
+integer; `0` disables stagnation stopping. Omit it to keep the preset's limit. Budget, target
+fitness, generation cap and time limit still apply.
+
 **Idempotency.** A repeat of a request — same `run_id`, same preset and overrides as sent, key
 order ignored — answers the run's current state and starts nothing. The same `run_id` with
 anything else is a 409. So is a `run_id` whose stream already exists in Redis when the Runner has no
@@ -169,7 +176,7 @@ One preset, with its value for every override key.
 | `algorithm` | `string` | yes | ga, de, pso, gp or es. |
 | `benchmark` | `string` | yes | The problem it solves. |
 | `description` | `string` | yes | What the preset runs, in a sentence. |
-| `defaults` | `object` | yes | The preset's value for every override key that has a default (all but seed). |
+| `defaults` | `object` | yes | The preset's value for every override key that has a default (all but seed), including termination.stagnation_generations: consecutive generations without improvement before an island stops; 0 disables stagnation stopping. |
 
 #### `PresetsView`
 
@@ -188,7 +195,7 @@ The body of `POST /runs`: a preset, and at most the published overrides.
 | --- | --- | --- | --- |
 | `run_id` | `string` | yes | Minted by the backend as run-YYYYMMDDTHHMMSSZ-xxxxxxxx (UTC timestamp, 8 lowercase hex digits) and used verbatim in every record, container and the stream key. |
 | `preset` | `string` | yes | A preset name from GET /presets. |
-| `overrides` | `object` | no | Optional. Dotted keys from GET /presets `overrides`, each within its bounds and of the exact JSON type; a key left out takes the preset's default. |
+| `overrides` | `object` | no | Optional. Dotted keys from GET /presets `overrides`, each within its bounds and of the exact JSON type; a key left out takes the preset's default. termination.stagnation_generations sets the number of consecutive generations without improvement before an island stops; 0 disables stagnation stopping. |
 
 #### `RunView`
 
@@ -207,6 +214,7 @@ A run, as every endpoint about one answers.
 | `num_islands` | int | ≥ 4, ≤ 6 |
 | `evaluation_budget` | int | ≥ 1,000, ≤ 250,000 |
 | `target_generations` | int | ≥ 2 |
+| `termination.stagnation_generations` | int | ≥ 0 |
 | `migration.enabled` | bool | `true` · `false` |
 | `migration.topology` | choice | `bidirectional_ring` · `fully_connected` · `lattice` · `random` · `ring` · `star` · `torus` |
 | `migration.interval` | int | ≥ 1 |
@@ -215,15 +223,15 @@ A run, as every endpoint about one answers.
 
 ### Presets and their defaults
 
-| Preset | Algorithm | Benchmark | `num_islands` | `evaluation_budget` | `target_generations` | `migration.enabled` | `migration.topology` | `migration.interval` | `migration.num_migrants` |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `de_rastrigin` | de | shifted_rotated | 5 | 100,000 | 200 | true | ring | 20 | 5 |
-| `docker_de_sphere` | de | sphere | 5 | 20,000 | 60 | true | ring | 5 | 3 |
-| `es_schwefel` | es | schwefel | 5 | 100,000 | 200 | true | star | 15 | 3 |
-| `full_dataset` | ga | tsp | 5 | 100,000 | 250 | true | ring | 20 | 5 |
-| `ga_knapsack` | ga | knapsack | 5 | 100,000 | 200 | true | fully_connected | 25 | 2 |
-| `ga_tsp` | ga | tsp | 5 | 100,000 | 300 | true | lattice | 30 | 4 |
-| `gp_nguyen7` | gp | nguyen7 | 5 | 100,000 | 100 | true | ring | 10 | 5 |
-| `gp_yacht` | gp | yacht | 5 | 100,000 | 80 | true | ring | 10 | 5 |
-| `pso_ackley` | pso | ackley | 5 | 100,000 | 200 | true | bidirectional_ring | 25 | 3 |
+| Preset | Algorithm | Benchmark | `num_islands` | `evaluation_budget` | `target_generations` | `termination.stagnation_generations` | `migration.enabled` | `migration.topology` | `migration.interval` | `migration.num_migrants` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `de_rastrigin` | de | shifted_rotated | 5 | 100,000 | 200 | 40 | true | ring | 20 | 5 |
+| `docker_de_sphere` | de | sphere | 5 | 20,000 | 60 | 20 | true | ring | 5 | 3 |
+| `es_schwefel` | es | schwefel | 5 | 100,000 | 200 | 40 | true | star | 15 | 3 |
+| `full_dataset` | ga | tsp | 5 | 100,000 | 250 | 100 | true | ring | 20 | 5 |
+| `ga_knapsack` | ga | knapsack | 5 | 100,000 | 200 | 50 | true | fully_connected | 25 | 2 |
+| `ga_tsp` | ga | tsp | 5 | 100,000 | 300 | 60 | true | lattice | 30 | 4 |
+| `gp_nguyen7` | gp | nguyen7 | 5 | 100,000 | 100 | 30 | true | ring | 10 | 5 |
+| `gp_yacht` | gp | yacht | 5 | 100,000 | 80 | 25 | true | ring | 10 | 5 |
+| `pso_ackley` | pso | ackley | 5 | 100,000 | 200 | 40 | true | bidirectional_ring | 25 | 3 |
 <!-- END GENERATED API REFERENCE -->
