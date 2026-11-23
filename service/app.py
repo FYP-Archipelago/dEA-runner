@@ -52,7 +52,8 @@ class RunRequest(BaseModel):
                 {
                     "run_id": _EXAMPLE_RUN_ID,
                     "preset": "DE_Sphere",
-                    "overrides": {"evaluation_budget": 5000, "seed": 42},
+                    "overrides": {"evaluation_budget": 5000,
+                                  "termination.stagnation_generations": 40, "seed": 42},
                 }
             ]
         },
@@ -66,7 +67,9 @@ class RunRequest(BaseModel):
     overrides: dict[str, Any] = Field(
         default={},
         description="Optional. Dotted keys from GET /presets `overrides`, each within its bounds and "
-        "of the exact JSON type; a key left out takes the preset's default.",
+        "of the exact JSON type; a key left out takes the preset's default. "
+        "termination.stagnation_generations sets the number of consecutive generations without "
+        "improvement before an island stops; 0 disables stagnation stopping.",
     )
 
     @field_validator("run_id")
@@ -105,8 +108,11 @@ class PresetView(BaseModel):
     benchmark: str = Field(description="The problem it solves.", examples=["sphere"])
     description: str = Field(description="What the preset runs, in a sentence.")
     defaults: dict[str, Any] = Field(
-        description="The preset's value for every override key that has a default (all but seed).",
+        description="The preset's value for every override key that has a default (all but seed), "
+        "including termination.stagnation_generations: consecutive generations without improvement "
+        "before an island stops; 0 disables stagnation stopping.",
         examples=[{"num_islands": 5, "evaluation_budget": 20000, "target_generations": 60,
+                   "termination.stagnation_generations": 20, "migration.enabled": True,
                    "migration.topology": "ring", "migration.interval": 5, "migration.num_migrants": 3}]
     )
 

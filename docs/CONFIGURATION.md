@@ -24,6 +24,7 @@ these overrides, exactly as `GET /presets` publishes them:
 | `num_islands` | int | 4 – 6 |
 | `evaluation_budget` | int | 1,000 – 250,000 (the maximum is a memory bound, mostly the backend's: [`MEMORY_MEASUREMENTS.md`](MEMORY_MEASUREMENTS.md)) |
 | `target_generations` | int | ≥ 2 |
+| `termination.stagnation_generations` | int | ≥ 0; consecutive generations without improvement before an island stops; 0 disables stagnation stopping |
 | `migration.enabled` | bool | `false` gives a baseline with no migration, which with `seed` repeats record for record; the other `migration.*` rules then do not apply |
 | `migration.topology` | choice | `bidirectional_ring` · `fully_connected` · `lattice` · `random` · `ring` · `star` · `torus` |
 | `migration.interval` | int | ≥ 1, and ≤ `target_generations` |
@@ -37,6 +38,9 @@ these overrides, exactly as `GET /presets` publishes them:
 
 * A key left out takes the preset's value. Values need the exact JSON type: `5000`, not `"5000"`
   or `5000.0`; `false`, not `0`.
+* Each preset's `defaults` in `GET /presets` includes `termination.stagnation_generations`.
+  Set that dotted key in a run's `overrides` to choose a different stagnation limit. Other
+  stopping conditions (budget, target fitness, generation cap and time limit) still apply.
 * Overriding the topology drops the preset's `topology_params` (they belong to its own topology,
   a star's hub say).
 * The whole configuration is then validated, so a combination that cannot run (migrants against
