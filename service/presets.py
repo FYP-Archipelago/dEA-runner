@@ -29,6 +29,7 @@ OVERRIDES: dict[str, dict[str, Any]] = {
     # cluster a run and two concurrent runs nearly filled its 2 GB Redis (docs/MEMORY_MEASUREMENTS.md).
     "evaluation_budget": {"type": "int", "min": 1000, "max": 250_000},
     "target_generations": {"type": "int", "min": 2},
+    "termination.stagnation_generations": {"type": "int", "min": 0},
     "migration.enabled": {"type": "bool"},
     "migration.topology": {"type": "choice", "choices": sorted(TOPOLOGIES)},
     "migration.interval": {"type": "int", "min": 1},
