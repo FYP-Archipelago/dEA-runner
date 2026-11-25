@@ -18,10 +18,10 @@ SHA-256 of each recorded in `MANIFEST.json`.
 
 | Group | Files | Used by |
 | --- | --- | --- |
-| `tsp/` | TSPLIB eil51, berlin52, att48, kroA100 — with published optima | `ga_tsp.yaml`, `full_dataset.yaml` |
-| `knapsack/` | Pisinger uncorrelated / weakly / strongly / inverse-strongly correlated, n=100 and 200 | `ga_knapsack.yaml` |
-| `regression/` | UCI Yacht (308×6), UCI Airfoil (1503×5) | `gp_yacht.yaml` |
-| `cec/` | CEC2017 shift vectors | `de_rastrigin.yaml` |
+| `tsp/` | TSPLIB eil51, berlin52, att48, kroA100 — with published optima | `GA_TSP_Berlin52.yaml`, `GA_TSP_KroA100.yaml` |
+| `knapsack/` | Pisinger uncorrelated / weakly / strongly / inverse-strongly correlated, n=100 and 200 | `GA_Knapsack.yaml` |
+| `regression/` | UCI Yacht (308×6), UCI Airfoil (1503×5) | `GP_Yacht.yaml` |
+| `cec/` | CEC2017 shift vectors | `DE_Rastrigin.yaml` |
 
 The instances are **committed to the repository**, so a clone has byte-identical
 data with no network access, and `run_start.datasets` records the SHA-256 of the
@@ -301,7 +301,7 @@ benchmark_params:
 
 Columns are named (`froude_number`, `angle_of_attack`, …) rather than `x0..xn`,
 so an evolved expression is readable. Row count drives GP evaluation cost — the
-tree runs over every row for every individual — which is why `gp_yacht.yaml` uses
+tree runs over every row for every individual — which is why `GP_Yacht.yaml` uses
 the smaller set.
 
 Real data changes the problem in ways worth having in the dataset: there is no

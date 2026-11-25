@@ -36,10 +36,10 @@ docker compose logs -f dummy-worker
 
 ```bash
 python scripts/dummy_backend.py presets
-python scripts/dummy_backend.py run docker_de_sphere
-python scripts/dummy_backend.py run ga_tsp --set evaluation_budget=50000 --set migration.topology=star
-python scripts/dummy_backend.py run de_rastrigin --set migration.enabled=false --set seed=7
-python scripts/dummy_backend.py run full_dataset --no-wait
+python scripts/dummy_backend.py run DE_Sphere
+python scripts/dummy_backend.py run GA_TSP_Berlin52 --set evaluation_budget=50000 --set migration.topology=star
+python scripts/dummy_backend.py run DE_Rastrigin --set migration.enabled=false --set seed=7
+python scripts/dummy_backend.py run GA_TSP_KroA100 --no-wait
 python scripts/dummy_backend.py status <run id>
 python scripts/dummy_backend.py cancel <run id>
 ```
@@ -48,7 +48,7 @@ python scripts/dummy_backend.py cancel <run id>
 stream with `validate_log`. It exits 0 only for a finished run with a valid stream:
 
 ```
-POST /runs {"run_id": "run-20261031T114053Z-f1f4dbb3", "preset": "docker_de_sphere", "overrides": {}} -> 202 {... "state": "running", "error": null}
+POST /runs {"run_id": "run-20261031T114053Z-f1f4dbb3", "preset": "DE_Sphere", "overrides": {}} -> 202 {... "state": "running", "error": null}
 17:10:53  run-20261031T114053Z-f1f4dbb3  running
 17:11:03  run-20261031T114053Z-f1f4dbb3  finished
 stream valid: run:run-20261031T114053Z-f1f4dbb3:runner_logs: 20,372 records, 19,950 evaluations, islands [0, 1, 2, 3, 4]
@@ -59,7 +59,7 @@ It finds the Runner and Redis through `.env`, or `--runner-url` / `$RUNNER_URL` 
 
 ```bash
 curl -s -X POST localhost:8000/runs -H 'Content-Type: application/json' \
-  -d '{"run_id": "run-20261031T120000Z-1a2b3c4d", "preset": "docker_de_sphere"}'
+  -d '{"run_id": "run-20261031T120000Z-1a2b3c4d", "preset": "DE_Sphere"}'
 ```
 
 The Swagger UI at <http://127.0.0.1:8000/docs> sends real requests (its script comes from a CDN;
@@ -133,8 +133,8 @@ are lost (404). [`API.md`](API.md), "Restarts".
 ## Experiment sweeps
 
 ```bash
-for i in $(seq 1 30); do python scripts/dummy_backend.py run de_rastrigin; done           # 30 independent samples
-for i in $(seq 1 30); do python scripts/dummy_backend.py run de_rastrigin --set seed=$i; done  # the same 30 every time
+for i in $(seq 1 30); do python scripts/dummy_backend.py run DE_Rastrigin; done           # 30 independent samples
+for i in $(seq 1 30); do python scripts/dummy_backend.py run DE_Rastrigin --set seed=$i; done  # the same 30 every time
 ```
 
 Without a seed every run draws fresh entropy. With one, the loop repeats exactly with migration off,
@@ -192,7 +192,7 @@ The island image runs one island alone (no master, so no migration):
 ```bash
 docker run --rm --network host \
   -e REDIS_URL=redis://:<password>@127.0.0.1:6380/0 \
-  -e ISLAND_CONFIG="$(python -c 'from service.presets import load_presets; print(load_presets()["docker_de_sphere"].build("run-20261031T120000Z-0000dbg1", {}).model_dump_json())')" \
+  -e ISLAND_CONFIG="$(python -c 'from service.presets import load_presets; print(load_presets()["DE_Sphere"].build("run-20261031T120000Z-0000dbg1", {}).model_dump_json())')" \
   archipelago-island:latest --run-id run-20261031T120000Z-0000dbg1 --island-id 0
 ```
 

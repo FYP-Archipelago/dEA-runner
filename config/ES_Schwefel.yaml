@@ -7,7 +7,7 @@
 # for that, so this run still totals ~100,000 evaluations like the others -- it
 # just reaches them with a much smaller parent population.
 
-description: "Self-adaptive (mu,lambda)-ES, 5 islands, Schwefel 10D, star topology."
+description: "Self-adaptive (mu,lambda)-ES on Schwefel 10D."
 
 algorithm: es
 algorithm_params:

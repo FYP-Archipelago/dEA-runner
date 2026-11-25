@@ -225,13 +225,13 @@ A run, as every endpoint about one answers.
 
 | Preset | Algorithm | Benchmark | `num_islands` | `evaluation_budget` | `target_generations` | `termination.stagnation_generations` | `migration.enabled` | `migration.topology` | `migration.interval` | `migration.num_migrants` |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `de_rastrigin` | de | shifted_rotated | 5 | 100,000 | 200 | 40 | true | ring | 20 | 5 |
-| `docker_de_sphere` | de | sphere | 5 | 20,000 | 60 | 20 | true | ring | 5 | 3 |
-| `es_schwefel` | es | schwefel | 5 | 100,000 | 200 | 40 | true | star | 15 | 3 |
-| `full_dataset` | ga | tsp | 5 | 100,000 | 250 | 100 | true | ring | 20 | 5 |
-| `ga_knapsack` | ga | knapsack | 5 | 100,000 | 200 | 50 | true | fully_connected | 25 | 2 |
-| `ga_tsp` | ga | tsp | 5 | 100,000 | 300 | 60 | true | lattice | 30 | 4 |
-| `gp_nguyen7` | gp | nguyen7 | 5 | 100,000 | 100 | 30 | true | ring | 10 | 5 |
-| `gp_yacht` | gp | yacht | 5 | 100,000 | 80 | 25 | true | ring | 10 | 5 |
-| `pso_ackley` | pso | ackley | 5 | 100,000 | 200 | 40 | true | bidirectional_ring | 25 | 3 |
+| `DE_Rastrigin` | de | shifted_rotated | 5 | 100,000 | 200 | 40 | true | ring | 20 | 5 |
+| `DE_Sphere` | de | sphere | 5 | 20,000 | 60 | 20 | true | ring | 5 | 3 |
+| `ES_Schwefel` | es | schwefel | 5 | 100,000 | 200 | 40 | true | star | 15 | 3 |
+| `GA_Knapsack` | ga | knapsack | 5 | 100,000 | 200 | 50 | true | fully_connected | 25 | 2 |
+| `GA_TSP_Berlin52` | ga | tsp | 5 | 100,000 | 300 | 60 | true | lattice | 30 | 4 |
+| `GA_TSP_KroA100` | ga | tsp | 5 | 100,000 | 250 | 100 | true | ring | 20 | 5 |
+| `GP_Nguyen7` | gp | nguyen7 | 5 | 100,000 | 100 | 30 | true | ring | 10 | 5 |
+| `GP_Yacht` | gp | yacht | 5 | 100,000 | 80 | 25 | true | ring | 10 | 5 |
+| `PSO_Ackley` | pso | ackley | 5 | 100,000 | 200 | 40 | true | bidirectional_ring | 25 | 3 |
 <!-- END GENERATED API REFERENCE -->
